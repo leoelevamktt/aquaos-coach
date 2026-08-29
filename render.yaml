@@ -1,14 +1,13 @@
 # Render Blueprint — AquaOS Coach (natacao-platform)
 # Postgres + API Fastify + Web Next.js
-services:
-  # ─── Banco de dados ───────────────────────────────────────────
-  - type: postgres
-    name: natacao-db
-    plan: free
-    database: natacao
+databases:
+  - name: natacao-db
+    databaseName: natacao
     user: natacao
+    plan: free
     postgresMajorVersion: "16"
 
+services:
   # ─── API Fastify (uploads + ffmpeg) ───────────────────────────
   - type: web
     name: natacao-api
@@ -35,7 +34,6 @@ services:
         value: /opt/render/project/src/apps/api/storage
       - key: NODE_ENV
         value: production
-      # Compartilhado com o web p/ CORS (preenchido após primeiro deploy)
       - key: WEB_ORIGIN
         sync: false
 
@@ -52,6 +50,6 @@ services:
       - key: NODE_VERSION
         value: "22"
       - key: NEXT_PUBLIC_API_URL
-        sync: false # preencher com https://natacao-api.onrender.com após criar a API
+        sync: false
       - key: NODE_ENV
         value: production
