@@ -29,6 +29,16 @@ type DatabaseShape = { resources: Record<ResourceKind, ManagedRecord[]>; audit: 
 const now = () => new Date().toISOString();
 const identifier = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
+const analysesRoot = fileURLToPath(new URL("../storage/analyses/", import.meta.url));
+
+function precomputedAnalysis(videoId: string) {
+  try {
+    return JSON.parse(readFileSync(resolve(analysesRoot, `${videoId}.json`), "utf8")) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
 function seed(): DatabaseShape {
   const timestamp = now();
   const records = (rows: Array<Record<string, unknown> & { id: string }>): ManagedRecord[] => rows.map((row) => ({ ...row, createdAt: timestamp, updatedAt: timestamp }));
@@ -45,8 +55,8 @@ function seed(): DatabaseShape {
       seasons: records([{ id: "temporada-2026", name: "Temporada Olímpica 2026/27", status: "active", startsOn: "2026-08-04", endsOn: "2027-07-19" }]),
       meets: records([{ id: "trofeu-brasil", name: "Troféu Brasil - José Finkel", status: "planned", startsOn: "2026-09-18", priority: "A", pool: "50 m" }]),
       videos: records([
-        { id: "video-treino-diurno", title: "Técnica de crawl · sessão diurna", athleteId: "ana-souza", athlete: "Ana Souza", event: "Técnica de crawl", status: "ready", filename: "treino-tecnico-diurno-1080p.mp4", url: "/uploads/treino-tecnico-diurno-1080p.mp4", durationSeconds: 16.95, width: 608, height: 1080, fps: 59.94, sizeBytes: 11337382, source: "Arquivo fornecido pelo treinador", analysisStatus: "pending" },
-        { id: "video-treino-noturno", title: "Ritmo e eficiência · sessão noturna", athleteId: "caio-martins", athlete: "Caio Martins", event: "Ritmo e eficiência", status: "ready", filename: "treino-tecnico-noturno-720p.mp4", url: "/uploads/treino-tecnico-noturno-720p.mp4", durationSeconds: 24.875, width: 1280, height: 720, fps: 59.94, sizeBytes: 8464955, source: "Arquivo fornecido pelo treinador", analysisStatus: "pending" },
+        { id: "video-treino-diurno", title: "Técnica de crawl · sessão diurna", athleteId: "ana-souza", athlete: "Ana Souza", event: "Técnica de crawl", status: "ready", filename: "treino-tecnico-diurno-1080p.mp4", url: "/uploads/treino-tecnico-diurno-1080p.mp4", thumbnailUrl: "/uploads/treino-tecnico-diurno-1080p-thumb.jpg", durationSeconds: 16.95, width: 608, height: 1080, fps: 59.94, sizeBytes: 11337382, source: "Arquivo fornecido pelo treinador", analysisStatus: "ready", analysis: precomputedAnalysis("video-treino-diurno") },
+        { id: "video-treino-noturno", title: "Ritmo e eficiência · sessão noturna", athleteId: "caio-martins", athlete: "Caio Martins", event: "Ritmo e eficiência", status: "ready", filename: "treino-tecnico-noturno-720p.mp4", url: "/uploads/treino-tecnico-noturno-720p.mp4", thumbnailUrl: "/uploads/treino-tecnico-noturno-720p-thumb.jpg", durationSeconds: 24.875, width: 1280, height: 720, fps: 59.94, sizeBytes: 8464955, source: "Arquivo fornecido pelo treinador", analysisStatus: "ready", analysis: precomputedAnalysis("video-treino-noturno") },
       ]),
       documents: records([]),
       staff: records([{ id: "leonardo-martins", name: "Leonardo Martins", role: "Administrador", access: "full", status: "active" }, { id: "camila-ferreira", name: "Camila Ferreira", role: "Treinadora", access: "full", status: "active" }]),
@@ -72,6 +82,13 @@ export class ManagedStore {
     this.data = existsSync(filePath) ? JSON.parse(readFileSync(filePath, "utf8")) as DatabaseShape : defaults;
     for (const kind of resourceKinds) this.data.resources[kind] ??= defaults.resources[kind];
     if (!this.data.resources.settings.length) this.data.resources.settings = defaults.resources.settings;
+    // Reparo: vídeos demo sem análise (data file antigo ou análise perdida) recebem a análise pré-computada.
+    for (const video of this.data.resources.videos) {
+      const fallback = defaults.resources.videos.find((candidate) => candidate.id === video.id);
+      if (fallback?.analysis && (!video.analysis || video.analysisStatus !== "ready")) {
+        Object.assign(video, { analysis: fallback.analysis, analysisStatus: "ready", status: video.status === "processing" ? "ready" : video.status });
+      }
+    }
     this.persist();
   }
 

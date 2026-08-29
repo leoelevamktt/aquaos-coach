@@ -1,0 +1,625 @@
+{
+  "engine": "AquaMotion",
+  "engineVersion": "1.0-beta",
+  "methodology": "Análise temporal de diferença entre quadros a 8 Hz. Ciclos e fases devem ser validados pelo treinador.",
+  "analyzedAt": "2026-08-29T19:55:23.538Z",
+  "metadata": {
+    "durationSeconds": 16.95,
+    "width": 608,
+    "height": 1080,
+    "fps": 59.94,
+    "sizeBytes": 11337382,
+    "bitrate": 5350976
+  },
+  "metrics": {
+    "detectedCycles": 5,
+    "estimatedCadence": 107,
+    "rhythmConsistency": 81,
+    "meanMotion": 74,
+    "peakMotion": 96,
+    "technicalIndex": 90
+  },
+  "timeline": [
+    {
+      "time": 0.125,
+      "motion": 52
+    },
+    {
+      "time": 0.25,
+      "motion": 52
+    },
+    {
+      "time": 0.375,
+      "motion": 53
+    },
+    {
+      "time": 0.5,
+      "motion": 54
+    },
+    {
+      "time": 0.625,
+      "motion": 56
+    },
+    {
+      "time": 0.75,
+      "motion": 56
+    },
+    {
+      "time": 0.875,
+      "motion": 58
+    },
+    {
+      "time": 1,
+      "motion": 59
+    },
+    {
+      "time": 1.125,
+      "motion": 61
+    },
+    {
+      "time": 1.25,
+      "motion": 62
+    },
+    {
+      "time": 1.375,
+      "motion": 64
+    },
+    {
+      "time": 1.5,
+      "motion": 65
+    },
+    {
+      "time": 1.625,
+      "motion": 66
+    },
+    {
+      "time": 1.75,
+      "motion": 66
+    },
+    {
+      "time": 1.875,
+      "motion": 68
+    },
+    {
+      "time": 2,
+      "motion": 68
+    },
+    {
+      "time": 2.125,
+      "motion": 70
+    },
+    {
+      "time": 2.25,
+      "motion": 70
+    },
+    {
+      "time": 2.375,
+      "motion": 72
+    },
+    {
+      "time": 2.5,
+      "motion": 72
+    },
+    {
+      "time": 2.625,
+      "motion": 73
+    },
+    {
+      "time": 2.75,
+      "motion": 73
+    },
+    {
+      "time": 2.875,
+      "motion": 73
+    },
+    {
+      "time": 3,
+      "motion": 73
+    },
+    {
+      "time": 3.125,
+      "motion": 75
+    },
+    {
+      "time": 3.25,
+      "motion": 74
+    },
+    {
+      "time": 3.375,
+      "motion": 76
+    },
+    {
+      "time": 3.5,
+      "motion": 76
+    },
+    {
+      "time": 3.625,
+      "motion": 76
+    },
+    {
+      "time": 3.75,
+      "motion": 76
+    },
+    {
+      "time": 3.875,
+      "motion": 77
+    },
+    {
+      "time": 4,
+      "motion": 77
+    },
+    {
+      "time": 4.125,
+      "motion": 78
+    },
+    {
+      "time": 4.25,
+      "motion": 79
+    },
+    {
+      "time": 4.375,
+      "motion": 80
+    },
+    {
+      "time": 4.5,
+      "motion": 82
+    },
+    {
+      "time": 4.625,
+      "motion": 82
+    },
+    {
+      "time": 4.75,
+      "motion": 83
+    },
+    {
+      "time": 4.875,
+      "motion": 83
+    },
+    {
+      "time": 5,
+      "motion": 84
+    },
+    {
+      "time": 5.125,
+      "motion": 83
+    },
+    {
+      "time": 5.25,
+      "motion": 85
+    },
+    {
+      "time": 5.375,
+      "motion": 85
+    },
+    {
+      "time": 5.5,
+      "motion": 86
+    },
+    {
+      "time": 5.625,
+      "motion": 86
+    },
+    {
+      "time": 5.75,
+      "motion": 87
+    },
+    {
+      "time": 5.875,
+      "motion": 86
+    },
+    {
+      "time": 6,
+      "motion": 86
+    },
+    {
+      "time": 6.125,
+      "motion": 84
+    },
+    {
+      "time": 6.25,
+      "motion": 85
+    },
+    {
+      "time": 6.375,
+      "motion": 83
+    },
+    {
+      "time": 6.5,
+      "motion": 84
+    },
+    {
+      "time": 6.625,
+      "motion": 83
+    },
+    {
+      "time": 6.75,
+      "motion": 85
+    },
+    {
+      "time": 6.875,
+      "motion": 85
+    },
+    {
+      "time": 7,
+      "motion": 87
+    },
+    {
+      "time": 7.125,
+      "motion": 88
+    },
+    {
+      "time": 7.25,
+      "motion": 91
+    },
+    {
+      "time": 7.375,
+      "motion": 91
+    },
+    {
+      "time": 7.5,
+      "motion": 94
+    },
+    {
+      "time": 7.625,
+      "motion": 94
+    },
+    {
+      "time": 7.75,
+      "motion": 96
+    },
+    {
+      "time": 7.875,
+      "motion": 95
+    },
+    {
+      "time": 8,
+      "motion": 96
+    },
+    {
+      "time": 8.125,
+      "motion": 94
+    },
+    {
+      "time": 8.25,
+      "motion": 94
+    },
+    {
+      "time": 8.375,
+      "motion": 92
+    },
+    {
+      "time": 8.5,
+      "motion": 93
+    },
+    {
+      "time": 8.625,
+      "motion": 91
+    },
+    {
+      "time": 8.75,
+      "motion": 93
+    },
+    {
+      "time": 8.875,
+      "motion": 93
+    },
+    {
+      "time": 9,
+      "motion": 94
+    },
+    {
+      "time": 9.125,
+      "motion": 93
+    },
+    {
+      "time": 9.25,
+      "motion": 94
+    },
+    {
+      "time": 9.375,
+      "motion": 92
+    },
+    {
+      "time": 9.5,
+      "motion": 94
+    },
+    {
+      "time": 9.625,
+      "motion": 93
+    },
+    {
+      "time": 9.75,
+      "motion": 93
+    },
+    {
+      "time": 9.875,
+      "motion": 91
+    },
+    {
+      "time": 10,
+      "motion": 91
+    },
+    {
+      "time": 10.125,
+      "motion": 87
+    },
+    {
+      "time": 10.25,
+      "motion": 86
+    },
+    {
+      "time": 10.375,
+      "motion": 84
+    },
+    {
+      "time": 10.5,
+      "motion": 85
+    },
+    {
+      "time": 10.625,
+      "motion": 83
+    },
+    {
+      "time": 10.75,
+      "motion": 84
+    },
+    {
+      "time": 10.875,
+      "motion": 83
+    },
+    {
+      "time": 11,
+      "motion": 83
+    },
+    {
+      "time": 11.125,
+      "motion": 80
+    },
+    {
+      "time": 11.25,
+      "motion": 79
+    },
+    {
+      "time": 11.375,
+      "motion": 76
+    },
+    {
+      "time": 11.5,
+      "motion": 75
+    },
+    {
+      "time": 11.625,
+      "motion": 73
+    },
+    {
+      "time": 11.75,
+      "motion": 74
+    },
+    {
+      "time": 11.875,
+      "motion": 73
+    },
+    {
+      "time": 12,
+      "motion": 74
+    },
+    {
+      "time": 12.125,
+      "motion": 72
+    },
+    {
+      "time": 12.25,
+      "motion": 71
+    },
+    {
+      "time": 12.375,
+      "motion": 70
+    },
+    {
+      "time": 12.5,
+      "motion": 69
+    },
+    {
+      "time": 12.625,
+      "motion": 69
+    },
+    {
+      "time": 12.75,
+      "motion": 69
+    },
+    {
+      "time": 12.875,
+      "motion": 69
+    },
+    {
+      "time": 13,
+      "motion": 69
+    },
+    {
+      "time": 13.125,
+      "motion": 69
+    },
+    {
+      "time": 13.25,
+      "motion": 69
+    },
+    {
+      "time": 13.375,
+      "motion": 69
+    },
+    {
+      "time": 13.5,
+      "motion": 68
+    },
+    {
+      "time": 13.625,
+      "motion": 68
+    },
+    {
+      "time": 13.75,
+      "motion": 67
+    },
+    {
+      "time": 13.875,
+      "motion": 67
+    },
+    {
+      "time": 14,
+      "motion": 64
+    },
+    {
+      "time": 14.125,
+      "motion": 63
+    },
+    {
+      "time": 14.25,
+      "motion": 61
+    },
+    {
+      "time": 14.375,
+      "motion": 60
+    },
+    {
+      "time": 14.5,
+      "motion": 58
+    },
+    {
+      "time": 14.625,
+      "motion": 58
+    },
+    {
+      "time": 14.75,
+      "motion": 56
+    },
+    {
+      "time": 14.875,
+      "motion": 55
+    },
+    {
+      "time": 15,
+      "motion": 53
+    },
+    {
+      "time": 15.125,
+      "motion": 52
+    },
+    {
+      "time": 15.25,
+      "motion": 50
+    },
+    {
+      "time": 15.375,
+      "motion": 50
+    },
+    {
+      "time": 15.5,
+      "motion": 49
+    },
+    {
+      "time": 15.625,
+      "motion": 48
+    },
+    {
+      "time": 15.75,
+      "motion": 47
+    },
+    {
+      "time": 15.875,
+      "motion": 46
+    },
+    {
+      "time": 16,
+      "motion": 44
+    },
+    {
+      "time": 16.125,
+      "motion": 44
+    },
+    {
+      "time": 16.25,
+      "motion": 43
+    },
+    {
+      "time": 16.375,
+      "motion": 43
+    },
+    {
+      "time": 16.5,
+      "motion": 42
+    },
+    {
+      "time": 16.625,
+      "motion": 41
+    },
+    {
+      "time": 16.75,
+      "motion": 41
+    }
+  ],
+  "events": [
+    {
+      "id": "phase-entry",
+      "time": 1.356,
+      "category": "entry",
+      "label": "Entrada no campo de análise",
+      "confidence": 93
+    },
+    {
+      "id": "phase-speed",
+      "time": 5.932,
+      "category": "speed",
+      "label": "Velocidade estabilizada",
+      "confidence": 88
+    },
+    {
+      "id": "motion-1",
+      "time": 7.75,
+      "category": "stroke",
+      "label": "Ciclo detectado 1",
+      "confidence": 96
+    },
+    {
+      "id": "motion-2",
+      "time": 8.25,
+      "category": "stroke",
+      "label": "Ciclo detectado 2",
+      "confidence": 95
+    },
+    {
+      "id": "motion-3",
+      "time": 9,
+      "category": "stroke",
+      "label": "Ciclo detectado 3",
+      "confidence": 95
+    },
+    {
+      "id": "motion-4",
+      "time": 9.5,
+      "category": "stroke",
+      "label": "Ciclo detectado 4",
+      "confidence": 95
+    },
+    {
+      "id": "motion-5",
+      "time": 10,
+      "category": "stroke",
+      "label": "Ciclo detectado 5",
+      "confidence": 94
+    },
+    {
+      "id": "phase-technique",
+      "time": 10.509,
+      "category": "technique",
+      "label": "Janela técnica principal",
+      "confidence": 91
+    },
+    {
+      "id": "phase-exit",
+      "time": 15.255,
+      "category": "finish",
+      "label": "Saída do campo de análise",
+      "confidence": 90
+    }
+  ]
+}
