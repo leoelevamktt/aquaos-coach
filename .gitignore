@@ -1,0 +1,23 @@
+# Dependências
+node_modules/
+
+# Builds
+.next/
+dist/
+*.tsbuildinfo
+
+# Ambiente
+.env
+.env.local
+.env.*.local
+
+# Dados locais da API (uploads e estado)
+apps/api/storage/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Temporários
+.tmp-*/
+.claude/

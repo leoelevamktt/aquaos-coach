@@ -1,0 +1,23 @@
+export const openapi = {
+  openapi: "3.0.3",
+  info: { title: "Natação Performance API", version: "0.1.0", description: "API local da plataforma de prescrição e treinamento." },
+  servers: [{ url: "http://localhost:4000" }],
+  paths: {
+    "/api/v1/health": { get: { summary: "Health check" } },
+    "/api/v1/auth/login": { post: { summary: "Cria sessão demo" } },
+    "/api/v1/auth/logout": { post: { summary: "Encerra sessão" } },
+    "/api/v1/auth/me": { get: { summary: "Usuário da sessão" } },
+    "/api/v1/dashboard": { get: { summary: "Resumo do treinador" } },
+    "/api/v1/workouts": { get: { summary: "Lista treinos" }, post: { summary: "Cria treino" } },
+    "/api/v1/workouts/{id}/publish": { post: { summary: "Publica treino" } },
+    "/api/v1/completed-workouts": { post: { summary: "Registra execução" } },
+    "/api/v1/wellness": { post: { summary: "Registra bem-estar" } },
+    "/api/v1/sync/{provider}": { post: { summary: "Executa simulador de dispositivo" } },
+    "/api/v1/manage/{kind}": { get: { summary: "Lista registros gerenciáveis" }, post: { summary: "Cria registro gerenciável" } },
+    "/api/v1/manage/{kind}/{id}": { get: { summary: "Detalha registro" }, patch: { summary: "Edita registro" }, delete: { summary: "Exclui registro" } },
+    "/api/v1/uploads": { post: { summary: "Envia vídeo ou documento" } },
+    "/api/v1/import/{kind}": { post: { summary: "Importa CSV, JSON ou FIT" } },
+    "/api/v1/videos/{id}/analyze": { post: { summary: "Analisa movimento e gera métricas do vídeo" } },
+    "/api/v1/videos/{id}/events": { post: { summary: "Adiciona marcador técnico ao vídeo" } },
+  },
+} as const;

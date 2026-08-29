@@ -1,0 +1,18 @@
+{
+  "name": "natacao-platform",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w @natacao/api\" \"npm run dev -w @natacao/web\"",
+    "build": "npm run build -w @natacao/domain && npm run build -w @natacao/api && npm run build -w @natacao/web",
+    "test": "npm run test -w @natacao/domain && npm run test -w @natacao/api",
+    "typecheck": "npm run typecheck -w @natacao/domain && npm run typecheck -w @natacao/api && npm run typecheck -w @natacao/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

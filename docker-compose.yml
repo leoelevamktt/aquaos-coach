@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: natacao
+      POSTGRES_USER: natacao
+      POSTGRES_PASSWORD: natacao
+    ports:
+      - "5432:5432"
+    volumes:
+      - natacao_pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U natacao -d natacao"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  api:
+    build:
+      context: .
+      dockerfile: infra/api.Dockerfile
+    environment:
+      API_PORT: 4000
+      DATABASE_URL: postgres://natacao:natacao@postgres:5432/natacao
+    ports:
+      - "4000:4000"
+    volumes:
+      - natacao_api_storage:/app/apps/api/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+  web:
+    build:
+      context: .
+      dockerfile: infra/web.Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+volumes:
+  natacao_pgdata:
+  natacao_api_storage:
