@@ -14,7 +14,7 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: npm install && npm run build -w @natacao/domain && npm run build -w @natacao/api
+    buildCommand: npm install --include=dev && npm run build -w @natacao/domain && npm run build -w @natacao/api
     startCommand: npm run start -w @natacao/api
     healthCheckPath: /api/v1/health
     envVars:
@@ -35,7 +35,7 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: npm install && npm run build -w @natacao/domain && npm run build -w @natacao/web
+    buildCommand: npm install --include=dev && npm run build -w @natacao/domain && npm run build -w @natacao/web
     startCommand: npm run start -w @natacao/web
     healthCheckPath: /
     envVars:
