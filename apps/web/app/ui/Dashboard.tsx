@@ -15,6 +15,7 @@ import { Analytics, Integrations, News, ProgramSettings, Season, Videos } from "
 import { ConnectionDialog, InviteModal, MeetDetail, QuickCreate, VideoReview, WorkoutComposer } from "./modals";
 import { ManagementCenter, type ManagementKind } from "./management";
 import type { WorkoutSeed } from "./workout-library-actions";
+import { AiAssistant } from "./ai-assistant";
 
 type Modal = "workout" | "invite" | "video" | "meet" | "command" | "manage" | "connection" | null;
 
@@ -131,5 +132,6 @@ export default function Dashboard() {
     {modal === "manage" && <ManagementCenter onClose={() => setModal(null)} onNotify={notify} initialKind={manageKind} createOnOpen={createManaged} />}
     {modal === "connection" && <ConnectionDialog initialProvider={connectionProvider} onClose={() => setModal(null)} onSave={notify} />}
     {toast && <div className="toast"><CircleCheck size={18} />{toast}</div>}
+    <AiAssistant />
   </div>;
 }

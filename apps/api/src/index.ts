@@ -8,6 +8,7 @@ import { DemoStore } from "./store.js";
 import { getSession, login, logout, roleAllows, sessionToken } from "./auth.js";
 import { ManagedStore } from "./managed-store.js";
 import { registerOperationalRoutes, uploadRoot } from "./operational-routes.js";
+import { registerAiRoutes } from "./ai-routes.js";
 
 const app = Fastify({ logger: true });
 const store = new DemoStore();
@@ -17,6 +18,7 @@ await app.register(cors, { origin: true, credentials: true });
 await app.register(multipart, { limits: { fileSize: 500 * 1024 * 1024, files: 1 } });
 await app.register(fastifyStatic, { root: uploadRoot, prefix: "/uploads/", decorateReply: false });
 registerOperationalRoutes(app, managedStore);
+registerAiRoutes(app, managedStore);
 
 app.get("/api/v1/health", async () => ({ ok: true, service: "natacao-api", mode: "demo", timestamp: new Date().toISOString() }));
 app.get("/api/v1/openapi.json", async () => openapi);
