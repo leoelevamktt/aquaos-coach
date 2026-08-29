@@ -1,5 +1,5 @@
 # Render Blueprint — AquaOS Coach (natacao-platform)
-# Postgres + API Fastify + Web Next.js
+# Postgres + API Fastify + Web Next.js (plano free)
 databases:
   - name: natacao-db
     databaseName: natacao
@@ -12,15 +12,11 @@ services:
   - type: web
     name: natacao-api
     runtime: node
-    plan: starter
+    plan: free
     region: oregon
     buildCommand: npm install && npm run build -w @natacao/domain && npm run build -w @natacao/api
     startCommand: npm run start -w @natacao/api
     healthCheckPath: /api/v1/health
-    disk: # uploads de vídeo persistem entre deploys
-      name: natacao-uploads
-      mountPath: /opt/render/project/src/apps/api/storage
-      sizeGB: 10
     envVars:
       - key: NODE_VERSION
         value: "22"
@@ -30,18 +26,14 @@ services:
         fromDatabase:
           name: natacao-db
           property: connectionString
-      - key: STORAGE_PATH
-        value: /opt/render/project/src/apps/api/storage
       - key: NODE_ENV
         value: production
-      - key: WEB_ORIGIN
-        sync: false
 
   # ─── Frontend Next.js ─────────────────────────────────────────
   - type: web
     name: natacao-web
     runtime: node
-    plan: starter
+    plan: free
     region: oregon
     buildCommand: npm install && npm run build -w @natacao/domain && npm run build -w @natacao/web
     startCommand: npm run start -w @natacao/web
