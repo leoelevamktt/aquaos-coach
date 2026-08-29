@@ -1,0 +1,23 @@
+name: Keep Render Awake
+
+# Mantém os servicos free do Render acordados durante o horario de uso.
+# Limite do plano free: 750 instance-hours/mes por workspace.
+# 2 servicos x 12h/dia x 31 dias = 744h -> dentro da cota.
+# Fora da janela (19h07-06h47 BRT) os servicos dormem e levantam em ~1 min no primeiro acesso.
+
+on:
+  schedule:
+    # A cada 13 min, das 10:00 as 21:59 UTC (07:00-18:59 de Brasilia)
+    - cron: "*/13 10-21 * * *"
+  workflow_dispatch: # permite disparo manual
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping API (health)
+        run: curl -sS --max-time 90 -o /dev/null -w "api: %{http_code} em %{time_total}s\n" https://natacao-api.onrender.com/api/v1/health || true
+
+      - name: Ping Web (home)
+        run: curl -sS --max-time 90 -o /dev/null -w "web: %{http_code} em %{time_total}s\n" https://natacao-web.onrender.com/ || true

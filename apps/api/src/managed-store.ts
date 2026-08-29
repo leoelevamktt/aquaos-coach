@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const resourceKinds = ["athletes", "groups", "workouts", "seasons", "meets", "videos", "documents", "staff", "zones", "goals", "activities", "settings"] as const;
 export type ResourceKind = typeof resourceKinds[number];
@@ -62,7 +63,9 @@ export class ManagedStore {
   private readonly filePath: string;
   private data: DatabaseShape;
 
-  constructor(filePath = resolve(process.env.STORAGE_PATH ?? resolve(process.cwd(), "storage"), "aquaos-data.json")) {
+  constructor(filePath = process.env.STORAGE_PATH
+    ? resolve(process.env.STORAGE_PATH, "aquaos-data.json")
+    : fileURLToPath(new URL("../storage/aquaos-data.json", import.meta.url))) {
     this.filePath = filePath;
     mkdirSync(dirname(filePath), { recursive: true });
     const defaults = seed();

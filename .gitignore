@@ -11,8 +11,8 @@ dist/
 .env.local
 .env.*.local
 
-# Dados locais da API (uploads e estado)
-apps/api/storage/
+# Dados locais da API (estado mutável) — uploads de vídeo de exemplo são versionados
+apps/api/storage/aquaos-data.json
 
 # Sistema
 .DS_Store
