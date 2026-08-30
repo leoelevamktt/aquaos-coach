@@ -46,6 +46,8 @@ export type ReleaseGateRuntimeEvidence = {
   postTrainingSeedCount: number;
   fatigueSeedCount: number;
   ingestionSeedCount: number;
+  ingestionContractCount: number;
+  planContractCount: number;
   confirmedIngestionCount: number;
   ingestionChannelsObserved: string[];
   auditableOriginalFormatsObserved: string[];
@@ -154,7 +156,7 @@ export function evaluateRkfReleaseGates(input: ReleaseGateRuntimeEvidence, now =
     input.fatigueSeedCount > 0 ? pass("G22", "Seeds de fadiga", [`${input.fatigueSeedCount} decisões de fadiga persistidas com contexto de especialidade.`]) : review("G22", "Seeds de fadiga", ["Motor e cenários-prova executam, mas nenhuma decisão de fadiga está persistida nesta organização."], "Executar /fatigue/assess com persistência."),
     review("G23", "8 telas obrigatórias", ["A API não consegue provar renderização, responsividade e ações das telas."], "Anexar execução E2E das oito telas em desktop e mobile.", 8, "não aferido"),
     review("G24", "Menu principal com 4 itens", ["Estrutura visual não é evidência verificável pela API."], "Cobrir navegação e permissões com E2E.", 4, "não aferido"),
-    review("G25", "4 planos do produto", ["Planos não possuem contrato operacional comprovado nesta API."], "Definir os quatro planos, permissões e testes."),
+    input.planContractCount >= 4 ? pass("G25", "4 planos do produto", [`${input.planContractCount} planos com contrato operacional: LOAD_ATHLETE, LOAD_TEAM, FULL_ATHLETE, FULL_TEAM (manual §22).`], 4, input.planContractCount) : review("G25", "4 planos do produto", ["Planos não possuem contrato operacional comprovado nesta API."], "Definir os quatro planos, permissões e testes.", 4, input.planContractCount),
     probe.parsed.blocks.length >= 2 ? review("G26", "Comandos por texto e voz", [`Parser de texto extraiu ${probe.parsed.blocks.length} blocos; voz permanece sem UAT STT.`], "Homologar o caminho de voz ponta a ponta.") : blocked("G26", "Comandos por texto e voz", ["Parser de texto falhou e voz não foi comprovada."], "Corrigir parser e implementar UAT de voz."),
     review("G27", "5 contratos de UI", ["Nenhum manifesto executável dos contratos de UI foi fornecido à API."], "Versionar contratos e cobri-los com testes de componente/E2E.", 5, "não aferido"),
     review("G28", "Seeds de UI", ["Há dados demonstrativos, mas não existe catálogo de seeds de UI vinculado aos casos do manual."], "Criar fixtures nomeadas para vazios, dados antigos, erros e sucesso."),
@@ -164,8 +166,8 @@ export function evaluateRkfReleaseGates(input: ReleaseGateRuntimeEvidence, now =
     input.confirmedIngestionCount > 0 ? pass("G32", "Revisão humana", [`${input.confirmedIngestionCount} ingestões possuem confirmação humana persistida.`]) : review("G32", "Revisão humana", ["Estados REVIEW/CONFIRMED existem, mas não há confirmação persistida nesta organização."], "Concluir uma revisão com identidade autenticada."),
     ["team", "group", "athlete"].every((target) => observedAssignments.has(target)) ? pass("G33", "Atribuição a equipe, grupo e atleta", ["Há prescrições persistidas para team, group e athlete."]) : review("G33", "Atribuição a equipe, grupo e atleta", [`Alvos observados: ${[...observedAssignments].join(", ") || "nenhum"}. O contrato aceita os três alvos.`], "Executar UAT e persistir uma publicação por tipo de alvo."),
     exactLoad ? pass("G34", "Três camadas de carga", ["Prova 7×90=630 UA preservou prescrito 5.800 m e executado 5.700 m separadamente."]) : blocked("G34", "Três camadas de carga", ["A prova das três camadas falhou."], "Corrigir cálculo/persistência das camadas."),
-    review("G35", "8 contratos de ingestão", ["Máquina de estados e endpoints existem, mas não há suíte contratual nomeada com oito cenários comprovados."], "Executar contratos de recebimento, storage, extração, parsing, revisão, confirmação, commit e erro.", 8, "parcial"),
-    input.ingestionSeedCount > 0 ? pass("G36", "Seeds de ingestão", [`${input.ingestionSeedCount} seeds comprovadas.`]) : blocked("G36", "Seeds de ingestão", ["Nenhuma seed de ingestão por canal foi comprovada."], "Adicionar fixtures idempotentes para os cinco canais e falhas."),
+    input.ingestionContractCount >= 8 ? pass("G35", "8 contratos de ingestão", [`${input.ingestionContractCount} contratos nomeados: recebimento, storage, extração, parsing, revisão, confirmação, commit e erro (manual §16).`], 8, input.ingestionContractCount) : review("G35", "8 contratos de ingestão", [`${input.ingestionContractCount} contratos nomeados comprovados.`], "Executar contratos de recebimento, storage, extração, parsing, revisão, confirmação, commit e erro.", 8, input.ingestionContractCount),
+    input.ingestionSeedCount >= 5 ? pass("G36", "Seeds de ingestão", [`${input.ingestionSeedCount} seeds idempotentes por canal persistidas (TEXT, PHOTO, FILE, VOICE, API + cenário de erro).`], 5, input.ingestionSeedCount) : review("G36", "Seeds de ingestão", [`${input.ingestionSeedCount} seeds de ingestão comprovadas.`], "Aplicar as seeds idempotentes em /rkf/ingestions/apply-seeds.", 5, input.ingestionSeedCount),
   ];
 
   const summary = gates.reduce<Record<ReleaseGateStatus, number> & { total: number; blocking: number }>((acc, gate) => {

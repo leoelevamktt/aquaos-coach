@@ -13,6 +13,7 @@ import { DOCUMENT_UPLOAD_EXTENSIONS, extractDocument, signatureMatches } from ".
 import { openapi } from "./openapi.js";
 import { evaluateRkfReleaseGates } from "./rkf-release-gates.js";
 import { DOMAIN_EVENT_CONTRACTS, DOMAIN_EVENT_CATALOG_VERSION } from "./domain-events.js";
+import { applyIngestionSeeds, INGESTION_CONTRACTS, INGESTION_SEEDS, INGESTION_SEED_VERSION, PRODUCT_PLANS, plansForRole, type IngestionSeedExecution } from "./rkf-ingestion-seeds.js";
 import {
   AGE_BANDS, buildLoadAlerts, classifyEvolution, coldStartFor, computeChronicSeries,
   computeLoadLayers, computeMonotony, computeResponseIndex, decideAdaptation, DISTRIBUTION_MATRICES,
@@ -111,8 +112,10 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       resultCount: (store?.list("results") ?? []).filter((item) => item.organizationId === organizationId).length,
       loadSnapshotCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === organizationId).length,
       postTrainingSeedCount: validationSessions().length,
-      fatigueSeedCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === organizationId && item.fatigueContext).length,
-      ingestionSeedCount: (store?.list("ingestions") ?? []).filter((item) => item.organizationId === organizationId && item.channel === "TEXT").length,
+  fatigueSeedCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === organizationId && item.fatigueContext).length + (store?.list("adaptationDecisions") ?? []).filter((item) => item.organizationId === organizationId && item.fatigueContext).length,
+  ingestionSeedCount: (store?.list("ingestions") ?? []).filter((item) => item.organizationId === organizationId && item.seedVersion === INGESTION_SEED_VERSION).length,
+  ingestionContractCount: INGESTION_CONTRACTS.length,
+  planContractCount: PRODUCT_PLANS.length,
       confirmedIngestionCount: ingestions.filter((item) => item.state === "CONFIRMED").length,
       ingestionChannelsObserved: ingestions.map((item) => String(item.channel ?? "")),
       auditableOriginalFormatsObserved: [...new Set(ingestions.map((item) => extname(String(item.sourceName ?? "")).slice(1).toLowerCase()).filter(Boolean))],
@@ -159,8 +162,10 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       resultCount: (store?.list("results") ?? []).filter((item) => item.organizationId === coach.organizationId).length,
       loadSnapshotCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === coach.organizationId).length,
       postTrainingSeedCount: validationSessions().length,
-      fatigueSeedCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === coach.organizationId && item.fatigueContext).length,
-      ingestionSeedCount: (store?.list("ingestions") ?? []).filter((item) => item.organizationId === coach.organizationId && item.channel === "TEXT").length,
+  fatigueSeedCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === coach.organizationId && item.fatigueContext).length + (store?.list("adaptationDecisions") ?? []).filter((item) => item.organizationId === coach.organizationId && item.fatigueContext).length,
+  ingestionSeedCount: (store?.list("ingestions") ?? []).filter((item) => item.organizationId === coach.organizationId && item.seedVersion === INGESTION_SEED_VERSION).length,
+  ingestionContractCount: INGESTION_CONTRACTS.length,
+  planContractCount: PRODUCT_PLANS.length,
       confirmedIngestionCount: ingestions.filter((item) => item.state === "CONFIRMED").length,
       ingestionChannelsObserved: ingestions.map((item) => String(item.channel ?? "")),
       auditableOriginalFormatsObserved: [...new Set(ingestions.map((item) => extname(String(item.sourceName ?? "")).slice(1).toLowerCase()).filter(Boolean))],
@@ -927,6 +932,42 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       featureFlags: { voiceIngestion: true, deviceCommands: false, wearableRead: true },
       role: user.role,
     };
+  });
+
+  /** G25: contrato formal dos quatro planos do produto (manual §22). */
+  app.get("/api/v1/rkf/plans", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    return {
+      version: INGESTION_SEED_VERSION,
+      plans: PRODUCT_PLANS,
+      availableToRole: plansForRole(user.role === "athlete" ? "athlete" : "coach"),
+    };
+  });
+
+  /** G35: os 8 contratos de ingestão nomeados com o que cada um prova. */
+  app.get("/api/v1/rkf/ingestions/contracts", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    return { version: INGESTION_SEED_VERSION, total: INGESTION_CONTRACTS.length, contracts: INGESTION_CONTRACTS };
+  });
+
+  /** G36: aplica seeds de ingestão idempotentes por canal na organização. */
+  app.post("/api/v1/rkf/ingestions/apply-seeds", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
+    const executions: IngestionSeedExecution[] = applyIngestionSeeds(store, coach.organizationId, coach.id);
+    const channels = [...new Set(INGESTION_SEEDS.map((seed) => seed.channel))];
+    return reply.code(200).send({
+      ok: true,
+      version: INGESTION_SEED_VERSION,
+      seeds: executions.length,
+      channels,
+      idempotent: executions.every((execution) => execution.ingestionId !== null),
+      executions,
+      note: "Seeds idempotentes por hash: reaplicar não duplica ingestões.",
+    });
   });
 
   /** G19/G20: fadiga por distância/especialidade e recuperação por fase. */
