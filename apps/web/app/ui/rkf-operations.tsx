@@ -77,8 +77,14 @@ export function RkfOperations({ onNotify }: { onNotify: (message: string) => voi
   };
   useEffect(() => {
     void apiRequest("/api/v1/auth/me")
-      .catch(() => process.env.NODE_ENV !== "production" ? apiRequest("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "coach@natacao.local", password: "natacao-demo" }) }) : undefined)
-      .then(() => refresh());
+      .then(() => refresh())
+      .catch(() => {
+        if (process.env.NODE_ENV !== "production") {
+          void apiRequest("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "coach@natacao.local", password: "natacao-demo" }) })
+            .then(() => refresh())
+            .catch(() => setError("Autenticação necessária. Faça login para acessar o núcleo RKF."));
+        } else setError("Autenticação necessária. Faça login para acessar o núcleo RKF.");
+      });
   }, []);
 
   if (!data) return <div className="rkf-loading"><LoaderCircle className="spin" size={24} /><strong>{error || "Carregando núcleo RKF V5.1"}</strong>{error && <button className="secondary-button" onClick={() => void refresh()}>Tentar novamente</button>}</div>;

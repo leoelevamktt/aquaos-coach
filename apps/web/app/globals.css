@@ -1701,3 +1701,20 @@ select:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .progress-ring b,
 .mobile-nav button,
 .mobile-nav button span { font-size: 11px; }
+
+/* ─── Auth gate ─────────────────────────────────────────────── */
+.auth-gate { min-height: 100vh; display: grid; place-items: center; background: linear-gradient(160deg, #0B1E3F 0%, #174A8C 120%); padding: 24px; }
+.auth-card { width: min(400px, 100%); background: #FFFFFF; border-radius: 18px; padding: 34px 30px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 24px 70px rgba(4, 14, 34, 0.45); }
+.auth-brand { display: flex; align-items: center; gap: 12px; padding-bottom: 6px; }
+.auth-brand .brand-mark { width: 44px; height: 44px; border-radius: 12px; background: #0B1E3F; color: #FFD700; display: grid; place-items: center; }
+.auth-brand strong { display: block; font-size: 17px; color: #0B1E3F; }
+.auth-brand em { color: #174A8C; font-style: normal; }
+.auth-brand small { color: #637083; font-size: 12px; }
+.auth-field { display: flex; flex-direction: column; gap: 6px; }
+.auth-field span { font-size: 12px; font-weight: 600; color: #475569; letter-spacing: 0.3px; }
+.auth-field input { border: 1px solid #DCE4EE; border-radius: 10px; padding: 11px 13px; font-size: 15px; color: #0B1E3F; background: #F7F9FC; }
+.auth-field input:focus { outline: 2px solid #174A8C; outline-offset: 1px; background: #FFFFFF; }
+.auth-error { color: #c13d4d; font-size: 13px; margin: 0; }
+.auth-hint { color: #637083; font-size: 12px; text-align: center; margin: 0; }
+.auth-card .primary-button { justify-content: center; }
+.auth-loading { align-items: center; gap: 12px; color: #E6F1FF; background: rgba(255, 255, 255, 0.06); box-shadow: none; font-weight: 600; }

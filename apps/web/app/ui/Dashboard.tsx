@@ -17,6 +17,7 @@ import { ManagementCenter, type ManagementKind } from "./management";
 import type { WorkoutSeed } from "./workout-library-actions";
 import { AiAssistant } from "./ai-assistant";
 import { RkfOperations } from "./rkf-operations";
+import { AuthGate } from "./auth-gate";
 import { apiRequest } from "./api";
 
 type Modal = "workout" | "invite" | "video" | "meet" | "command" | "manage" | "connection" | null;
@@ -77,7 +78,6 @@ export default function Dashboard() {
   ] : [];
   const selectSearch = (action: () => void) => { action(); setSearch(""); };
   useEffect(() => {
-    void apiRequest("/api/v1/auth/me").catch(() => process.env.NODE_ENV !== "production" ? apiRequest("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "coach@natacao.local", password: "natacao-demo" }) }) : undefined);
     const shortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); searchInput.current?.focus(); }
       if (event.key === "Escape") setSearch("");
@@ -86,7 +86,7 @@ export default function Dashboard() {
     return () => window.removeEventListener("keydown", shortcut);
   }, []);
 
-  return <div className="app-shell">
+  return <AuthGate><div className="app-shell">
     <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
       <button className="brand" onClick={() => go("today")}>
         <span className="brand-mark"><Waves size={21} /></span>
@@ -139,5 +139,5 @@ export default function Dashboard() {
     {modal === "connection" && <ConnectionDialog initialProvider={connectionProvider} onClose={() => setModal(null)} onSave={notify} />}
     {toast && <div className="toast"><CircleCheck size={18} />{toast}</div>}
     <AiAssistant />
-  </div>;
+  </div></AuthGate>;
 }
