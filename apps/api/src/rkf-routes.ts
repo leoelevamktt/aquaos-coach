@@ -520,7 +520,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
     const coach = await requireCoach(request, reply);
     if (!coach) return;
     if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
-    const body = z.object({ prescription: z.record(z.unknown()), audit: z.record(z.unknown()), athleteId: z.string(), title: z.string().min(2) }).safeParse(request.body);
+    const body = z.object({ prescription: z.record(z.unknown()), audit: z.record(z.unknown()), athleteId: z.string(), title: z.string().min(2), targetType: z.enum(["team", "group", "athlete"]).optional(), targetId: z.string().optional() }).safeParse(request.body);
     if (!body.success) return reply.code(400).send({ error: "Prescrição inválida", details: body.error.flatten() });
     return reply.code(201).send(store.create("prescriptions", { ...body.data, status: "PENDING_APPROVAL", immutable: false, version: 1, organizationId: coach.organizationId, actorId: coach.id }));
   });
