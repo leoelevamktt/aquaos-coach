@@ -61,6 +61,11 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.elevamkt.digital/v1}
       LLM_MODEL: ${LLM_MODEL:-llmapi/glm-5.3}
+      # Provisionamento de contas de produção (senhas nunca no código)
+      AUTH_COACH_EMAIL: ${AUTH_COACH_EMAIL:-treinador@elevamkt.digital}
+      AUTH_COACH_PASSWORD: ${AUTH_COACH_PASSWORD:-}
+      AUTH_ATHLETE_EMAIL: ${AUTH_ATHLETE_EMAIL:-atleta@elevamkt.digital}
+      AUTH_ATHLETE_PASSWORD: ${AUTH_ATHLETE_PASSWORD:-}
     expose:
       - "4000" # apenas na rede interna do compose; Caddy publica
     volumes:
