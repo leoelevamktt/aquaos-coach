@@ -61,7 +61,7 @@ function declaredTotal(text: string): number | null {
 
 export function parseTrainingText(text: string): ParsedTraining {
   const warnings: string[] = [];
-  const lines = text.split(/\r?\n|(?<=[a-z0-9)])\s*[;]\s*(?=\d)/i)
+  const lines = text.split(/\r?\n|(?<=[a-z0-9)])\s*[;]\s*(?=\d|[A-Za-zÀ-ÿ])/i)
     .map((line) => line.trim())
     .filter((line) => line.length > 1 && /[\dx]/i.test(line));
 
