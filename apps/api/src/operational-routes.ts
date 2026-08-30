@@ -21,7 +21,7 @@ const safeName = (name: string) => basename(name).normalize("NFD").replace(/[\u0
 const id = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
 export function registerOperationalRoutes(app: FastifyInstance, store: ManagedStore) {
-  const protectedKinds = ["ingestions", "prescriptions", "results", "loadSnapshots", "adaptationDecisions", "governance"];
+  const protectedKinds = ["ingestions", "prescriptions", "results", "loadSnapshots", "adaptationDecisions", "governance", "users", "authSessions"];
   app.get("/api/v1/manage", async (request, reply) => { const user = getSession(sessionToken(request)); if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" }); return { resources: Object.fromEntries(resourceKinds.map((kind) => [kind, store.list(kind).filter((item) => item.organizationId === user!.organizationId).length])), kinds: resourceKinds, audit: store.audit(15) }; });
   app.get("/api/v1/manage/audit", async (request, reply) => { const user = getSession(sessionToken(request)); if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" }); const query = z.object({ limit: z.coerce.number().min(1).max(500).default(100) }).parse(request.query); return { data: store.audit(500).filter((entry) => (entry.organizationId ?? "org-demo") === user!.organizationId).slice(0, query.limit) }; });
 

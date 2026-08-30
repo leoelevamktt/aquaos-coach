@@ -1434,6 +1434,18 @@ select:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .athlete-auth-loading { min-height: 70vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #475569; font-weight: 600; }
 .spin { animation: ai-blink 1.2s infinite linear; }
 
+/* ─── Correção: overlap no cartão de competição (desktop 1024–1440px) ── */
+.next-meet-card .meet-countdown { margin-bottom: 14px; }
+.next-meet-card > button { margin-top: 10px; }
+@media (min-width: 1024px) and (max-width: 1440px) {
+  .next-meet-card .meet-countdown { margin-bottom: 18px; }
+  .next-meet-card .meet-countdown > div { max-width: 150px; }
+}
+
+/* ─── Chip "+X atletas" na lista da água ────────────────────── */
+.water-list .water-more { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; border: 1px dashed #cfd9e6; border-radius: 10px; background: #f7f9fc; color: #475569; font-size: 12px; }
+.water-list .water-more-chip { background: #E6F1FF; color: #174A8C; font-weight: 700; border-radius: 999px; padding: 3px 10px; font-size: 11.5px; }
+
 .ai-typing { display: flex; gap: 4px; align-items: center; padding: 4px 0; }
 .ai-typing i { width: 6px; height: 6px; border-radius: 50%; background: #8fb8ae; animation: ai-blink 1.2s infinite; }
 .ai-typing i:nth-child(2) { animation-delay: .18s; }
@@ -1733,3 +1745,21 @@ select:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .auth-hint { color: #637083; font-size: 12px; text-align: center; margin: 0; }
 .auth-card .primary-button { justify-content: center; }
 .auth-loading { align-items: center; gap: 12px; color: #E6F1FF; background: rgba(255, 255, 255, 0.06); box-shadow: none; font-weight: 600; }
+
+/* Interstitial de role — atleta no painel do coach */
+.auth-denied { text-align: center; align-items: center; }
+.auth-denied-icon { width: 56px; height: 56px; border-radius: 50%; background: #E6F1FF; color: #174A8C; display: grid; place-items: center; }
+.auth-denied-title { font-family: var(--font-display), sans-serif; font-size: 21px; color: #0B1E3F; margin: 0; }
+.auth-denied-text { color: #475569; font-size: 13.5px; line-height: 1.55; margin: 0; }
+.auth-denied-text strong { color: #174A8C; }
+.auth-denied-link { text-decoration: none; }
+.auth-denied-logout { background: #FFFFFF; border: 1px solid #DCE4EE; color: #0B1E3F; }
+.auth-denied-logout:hover { background: #E6F1FF; }
+
+/* Interstitial de role — comissão técnica no app do atleta */
+.athlete-role-gate { min-height: 70vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px 22px; }
+.athlete-role-card { width: min(340px, 100%); display: flex; flex-direction: column; align-items: center; gap: 13px; text-align: center; padding: 30px 24px; border-radius: 18px; background: #FFFFFF; border: 1px solid #E6F1FF; box-shadow: 0 18px 50px rgba(11, 30, 63, 0.12); }
+.athlete-role-card > svg { color: #174A8C; }
+.athlete-role-card h1 { font-family: var(--font-display), sans-serif; font-size: 24px; letter-spacing: -.5px; color: #0B1E3F; }
+.athlete-role-card p { color: #475569; font-size: 13px; line-height: 1.55; margin: 0; }
+.athlete-role-card p strong { color: #174A8C; }

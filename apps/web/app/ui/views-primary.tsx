@@ -8,7 +8,7 @@ import {
   Plus, Search, SlidersHorizontal, Smartphone, Sparkles, Target, Trophy, Upload, UserPlus,
   UserRound, Users, Watch, Waves,
 } from "lucide-react";
-import { athletes, insights, practices, strengthLibrary, workoutLibrary, zoneDistribution } from "./demo-data";
+import { athletes, insights, meets as demoMeets, practices, strengthLibrary, workoutLibrary, zoneDistribution, type AthleteProfile } from "./demo-data";
 import { Avatar, formatNumber, Metric, PageTitle, ProgressRing, SectionHead, StatusDot } from "./components";
 import { API_URL, apiRequest, importFile } from "./api";
 import { csvRow, downloadFile } from "./client-utils";
@@ -21,24 +21,65 @@ import { WorkoutTemplateEditor, type WorkoutSeed } from "./workout-library-actio
 export type AppView = "today" | "athletes" | "practices" | "seasons" | "videos" | "analytics" | "rkf" | "inbox" | "integrations" | "settings";
 
 export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate: () => void; onNavigate: (view: AppView) => void; onAthlete: (id: string) => void; onNotify: (message: string) => void }) {
+  // Data e saudação ao vivo (cliente, evita mismatch de hidratação)
+  const [today, setToday] = useState<{ kicker: string; greeting: string } | null>(null);
+  // Atletas reais da API; contagem sempre consistente com a lista exibida
+  const [roster, setRoster] = useState<AthleteProfile[] | null>(null);
+  // Próxima competição do calendário (fallback: demo em dev)
+  const [meet, setMeet] = useState<{ name: string; startsOn?: string; pool?: string; priority?: string } | null>(null);
+
+  useEffect(() => {
+    const now = new Date();
+    const weekday = new Intl.DateTimeFormat("pt-BR", { weekday: "long" }).format(now).toUpperCase();
+    const dateLabel = new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long" }).format(now).toUpperCase();
+    const hour = now.getHours();
+    setToday({ kicker: `${weekday} · ${dateLabel}`, greeting: hour < 12 ? "Bom dia, Leonardo." : hour < 18 ? "Boa tarde, Leonardo." : "Boa noite, Leonardo." });
+    void apiRequest<{ data: Array<Record<string, unknown>> }>("/api/v1/athletes")
+      .then((response) => {
+        const live = (response.data ?? []).map((record) => {
+          const fallback = athletes.find((demo) => demo.id === record.id) ?? athletes[0];
+          const name = String(record.name ?? fallback.name);
+          const initials = name.split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+          return { ...fallback, id: String(record.id), name, initials, group: String(record.group ?? fallback.group) };
+        });
+        if (live.length) setRoster(live);
+        else if (process.env.NODE_ENV !== "production") setRoster(athletes);
+      })
+      .catch(() => { if (process.env.NODE_ENV !== "production") setRoster(athletes); });
+    void apiRequest<{ data: Array<Record<string, unknown>> }>("/api/v1/manage/meets")
+      .then((response) => {
+        const upcoming = (response.data ?? [])
+          .filter((record) => !record.startsOn || String(record.startsOn) >= new Date().toISOString().slice(0, 10))
+          .sort((a, b) => String(a.startsOn ?? "").localeCompare(String(b.startsOn ?? "")))[0];
+        if (upcoming) setMeet({ name: String(upcoming.name ?? "Competição"), startsOn: String(upcoming.startsOn ?? ""), pool: String(upcoming.pool ?? "50 m"), priority: String(upcoming.priority ?? "A") });
+        else setMeet({ name: demoMeets[0].name, startsOn: new Date(Date.now() + demoMeets[0].days * 86_400_000).toISOString().slice(0, 10), pool: `${demoMeets[0].location} · Piscina ${demoMeets[0].pool}`, priority: demoMeets[0].priority });
+      })
+      .catch(() => setMeet({ name: demoMeets[0].name, startsOn: new Date(Date.now() + demoMeets[0].days * 86_400_000).toISOString().slice(0, 10), pool: `${demoMeets[0].location} · Piscina ${demoMeets[0].pool}`, priority: demoMeets[0].priority }));
+  }, []);
+
+  const displayAthletes = roster ?? [];
+  const visibleCount = Math.min(displayAthletes.length, 4);
+  const hiddenCount = Math.max(0, displayAthletes.length - visibleCount);
+  const daysToMeet = meet?.startsOn ? Math.max(0, Math.round((new Date(meet.startsOn).getTime() - Date.now()) / 86_400_000)) : null;
+
   const exportDailyReport = () => {
-    const rows = [csvRow(["Indicador", "Valor"]), csvRow(["Volume semanal", "148,9 km"]), csvRow(["Readiness médio", "74/100"]), csvRow(["Presença", "91%"]), csvRow(["Provas filmadas", 4])];
-    downloadFile("relatorio-operacional-2026-08-28.csv", rows.join("\n"));
+    const rows = [csvRow(["Indicador", "Valor"]), csvRow(["Atletas ativos", displayAthletes.length]), csvRow(["Volume semanal", "148,9 km"]), csvRow(["Readiness médio", "74/100"]), csvRow(["Presença", "91%"]), csvRow(["Provas filmadas", 4])];
+    downloadFile(`relatorio-operacional-${new Date().toISOString().slice(0, 10)}.csv`, rows.join("\n"));
     onNotify("Relatório operacional exportado em CSV.");
   };
   return <>
-    <PageTitle kicker="SEXTA-FEIRA · 28 DE AGOSTO" title="Bom dia, Leonardo." subtitle="A equipe está estável. Há duas decisões importantes antes da sessão da tarde.">
+    <PageTitle kicker={today?.kicker ?? "CARREGANDO…"} title={today?.greeting ?? "Bom dia, Leonardo."} subtitle="A equipe está estável. Há duas decisões importantes antes da sessão da tarde.">
       <button className="secondary-button" onClick={exportDailyReport}><Download size={17} />Relatório</button><button className="primary-button" onClick={onCreate}><Plus size={17} />Novo treino</button>
     </PageTitle>
     <section className="hero-grid">
-      <article className="next-meet-card">
-        <div className="meet-top"><span className="priority">PRIORIDADE A</span><Trophy size={18} /></div>
-        <div><span>PRÓXIMA COMPETIÇÃO</span><h2>Troféu Brasil - José Finkel</h2><p><MapPin size={14} />São Paulo · Piscina 50 m</p></div>
-        <div className="meet-countdown"><strong>21</strong><span>dias</span><div><b>4</b> atletas com índice<br /><b>12</b> provas inscritas</div></div>
+      {meet && <article className="next-meet-card">
+        <div className="meet-top"><span className="priority">PRIORIDADE {meet.priority}</span><Trophy size={18} /></div>
+        <div><span>PRÓXIMA COMPETIÇÃO</span><h2>{meet.name}</h2><p><MapPin size={14} />{meet.pool ?? "Piscina 50 m"}</p></div>
+        <div className="meet-countdown"><strong>{daysToMeet ?? "—"}</strong><span>dias</span><div><b>4</b> atletas com índice<br /><b>12</b> provas inscritas</div></div>
         <button onClick={() => onNavigate("seasons")}>Abrir competição <ArrowRight size={16} /></button>
-      </article>
+      </article>}
       <div className="metric-grid">
-        <Metric label="VOLUME SEMANAL" value="148,9 km" detail="↑ 6,8% vs. semana passada" icon={Waves} />
+        <Metric label="ATLETAS ATIVOS" value={displayAthletes.length ? String(displayAthletes.length) : "—"} detail={displayAthletes.length ? `${displayAthletes.length} no plantel` : "carregando"} icon={Users} />
         <Metric label="READINESS MÉDIO" value="74 / 100" detail="4 atletas prontos · 1 atenção" icon={Gauge} tone="violet" />
         <Metric label="PRESENÇA" value="91%" detail="32 de 35 presenças" icon={CircleCheck} tone="blue" />
         <Metric label="PROVAS FILMADAS" value="4" detail="2 aguardam sua revisão" icon={Film} tone="orange" />
@@ -55,10 +96,11 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate:
           </div>
         </article>
         <article className="card">
-          <SectionHead title="Na água hoje" subtitle="6 atletas · 5.200 m · AN2" action="Ver sessão" onAction={() => onNavigate("practices")} />
+          <SectionHead title="Na água hoje" subtitle={`${displayAthletes.length || "…"} atletas · 5.200 m · AN2`} action="Ver sessão" onAction={() => onNavigate("practices")} />
           <div className="session-strip"><div className="session-time"><Clock size={15} /><b>07:30</b></div><div><strong>Ritmo de prova · 200 Livre</strong><small>3 blocos · 1h42 estimados · Piscina olímpica</small></div><span className="zone-tag an2">AN2</span></div>
           <div className="water-list">
-            {athletes.slice(0, 4).map((athlete) => <button key={athlete.id} onClick={() => onAthlete(athlete.id)}><Avatar initials={athlete.initials} color={athlete.color} small /><span><b>{athlete.name}</b><small>{athlete.group}</small></span><em>{formatNumber(athlete.weeklyDistance)} m</em><ProgressRing value={athlete.readiness ?? 0} size="small" /></button>)}
+            {displayAthletes.slice(0, visibleCount).map((athlete) => <button key={athlete.id} onClick={() => onAthlete(athlete.id)}><Avatar initials={athlete.initials} color={athlete.color} small /><span><b>{athlete.name}</b><small>{athlete.group}</small></span><em>{formatNumber(athlete.weeklyDistance)} m</em><ProgressRing value={athlete.readiness ?? 0} size="small" /></button>)}
+            {hiddenCount > 0 && <button className="water-more" onClick={() => onNavigate("athletes")}><span className="water-more-chip">+{hiddenCount} atletas</span><span>ver plantel completo</span><ArrowRight size={15} /></button>}
           </div>
         </article>
       </div>

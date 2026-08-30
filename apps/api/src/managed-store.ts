@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PostgresPersistence, type PersistenceHealth, type RkfSeedImport } from "./postgres-persistence.js";
 
-export const resourceKinds = ["athletes", "groups", "workouts", "seasons", "meets", "videos", "documents", "staff", "zones", "goals", "activities", "ingestions", "prescriptions", "results", "loadSnapshots", "adaptationDecisions", "governance", "settings"] as const;
+export const resourceKinds = ["athletes", "groups", "workouts", "seasons", "meets", "videos", "documents", "staff", "zones", "goals", "activities", "ingestions", "prescriptions", "results", "loadSnapshots", "adaptationDecisions", "governance", "settings", "users", "authSessions"] as const;
 export type ResourceKind = typeof resourceKinds[number];
 
 export type ManagedRecord = {
@@ -77,6 +77,8 @@ function seed(): DatabaseShape {
       results: records([]),
       loadSnapshots: records([]),
       adaptationDecisions: records([]),
+      users: records([]),
+      authSessions: records([]),
       governance: records([
         { id: "rkf-v5-1", name: "Homologação RKF V5.1", status: "validation", seedExpectedSessions: 910, seedExpectedBlocks: 6226, seedImported: false, decisionRegisterOpen: true },
       ]),

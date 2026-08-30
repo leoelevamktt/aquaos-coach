@@ -5,7 +5,7 @@ import fastifyStatic from "@fastify/static";
 import { z } from "zod";
 import { openapi } from "./openapi.js";
 import { DemoStore } from "./store.js";
-import { athleteMayAccess, getSession, login, logout, roleAllows, sessionToken } from "./auth.js";
+import { athleteMayAccess, attachAuthStore, getSession, login, logout, roleAllows, sessionToken } from "./auth.js";
 import { ManagedStore } from "./managed-store.js";
 import { registerOperationalRoutes, uploadRoot } from "./operational-routes.js";
 import { registerAiRoutes } from "./ai-routes.js";
@@ -17,6 +17,7 @@ const app = Fastify({ logger: true });
 const store = new DemoStore();
 const managedStore = new ManagedStore();
 const persistence = await managedStore.initialize();
+attachAuthStore(managedStore);
 const loginAttempts = new Map<string, { failures: number; blockedUntil: number }>();
 
 const allowedOrigins = (process.env.CORS_ORIGINS ?? "http://localhost:3000").split(",").map((origin) => origin.trim()).filter(Boolean);

@@ -90,7 +90,7 @@ export default function AthleteApp() {
   const [periods, setPeriods] = useState(["Manhã", "Tarde"]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [authState, setAuthState] = useState<"checking" | "signed-out" | "signed-in">("checking");
+  const [authState, setAuthState] = useState<"checking" | "signed-out" | "signed-in" | "denied">("checking");
   const [onboardingProfile, setOnboardingProfile] = useState<OnboardingProfile>({ fullName:"Ana Souza", birthDate:"2002-04-18", sex:"Feminino", category:"Absoluto", events:["200L","400L"], otherEvent:"", level:"Seleção nacional", club:"", targetMeet:"Campeonato Brasileiro", meetDate:"2026-09-20", primaryEvent:"400 Livre", secondaryEvent:"200 Livre", objective:"Índice internacional", medicalAccepted:true, responsibilityAccepted:true });
   const go = (next: AthleteScreen, step?: number) => router.push(routeFor(next, step));
 
@@ -100,8 +100,12 @@ export default function AthleteApp() {
   useEffect(() => {
     if (publicScreens.includes(screen)) return;
     let cancelled = false;
+    const roleFrom = (payload: unknown) => {
+      const withUser = payload as { user?: { role?: string }; role?: string };
+      return withUser?.user?.role ?? withUser?.role;
+    };
     void apiRequest("/api/v1/auth/me")
-      .then((user) => { if (!cancelled) setAuthState((user as { user?: { role?: string } }).user?.role === "athlete" || (user as { role?: string }).role === "athlete" ? "signed-in" : "signed-in"); })
+      .then((payload) => { if (!cancelled) setAuthState(roleFrom(payload) === "athlete" ? "signed-in" : "denied"); })
       .catch(() => {
         if (cancelled) return;
         if (process.env.NODE_ENV !== "production") {
@@ -115,6 +119,14 @@ export default function AthleteApp() {
 
   if (!publicScreens.includes(screen) && authState === "checking") {
     return <main className="athlete-phone light"><PhoneStatus /><div className="athlete-auth-loading"><LoaderCircle className="spin" size={26} /><span>Verificando sessão…</span></div></main>;
+  }
+
+  if (!publicScreens.includes(screen) && authState === "denied") {
+    return <main className="athlete-phone light"><PhoneStatus /><div className="athlete-role-gate"><div className="athlete-role-card"><ShieldCheck size={34} /><h1>Área do atleta</h1><p>A conta logada é da <strong>comissão técnica</strong> e não pode acessar o app do atleta. Use o painel do treinador.</p><AthleteButton onClick={() => window.location.assign("/pt/coach/today")}>Ir para o painel do treinador</AthleteButton></div></div></main>;
+  }
+
+  if (!publicScreens.includes(screen) && authState === "signed-out") {
+    return <main className="athlete-phone light"><PhoneStatus /><div className="athlete-role-gate"><div className="athlete-role-card"><LoaderCircle className="spin" size={30} /><h1>Redirecionando…</h1><p>Sessão expirada. Faça login para continuar.</p></div></div></main>;
   }
 
   const toggle = (value: string, current: string[], update: (next: string[]) => void) => update(current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
@@ -168,7 +180,11 @@ export default function AthleteApp() {
   const login = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true); setFeedback("");
     try {
-      await apiRequest("/api/v1/auth/login", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
+      const response = await apiRequest<{ user?: { role?: string } }>("/api/v1/auth/login", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
+      if (response?.user && response.user.role !== "athlete") {
+        setFeedback("Esta conta é da comissão técnica. Use o painel do treinador.");
+        return;
+      }
       go("checkin");
     } catch (cause) { setFeedback(cause instanceof Error ? cause.message : "Não foi possível entrar."); }
     finally { setSaving(false); }
