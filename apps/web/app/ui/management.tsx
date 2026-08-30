@@ -97,7 +97,18 @@ export function ManagementCenter({ onClose, onNotify, initialKind = "athletes", 
   };
   const handleUpload = async (file?: File) => {
     if (!file) return;
-    try { await uploadFile(file, kind === "videos" ? "videos" : "documents"); onNotify("Arquivo armazenado com sucesso."); await load(); } catch (error) { onNotify(error instanceof Error ? error.message : "Falha no upload"); }
+    try {
+      const record = await uploadFile(file, kind === "videos" ? "videos" : "documents");
+      const extractionStatus = String(record.extractionStatus ?? "");
+      onNotify(extractionStatus === "needs_ocr"
+        ? "Arquivo preservado, mas sem texto detectado. OCR não está habilitado neste ambiente."
+        : extractionStatus === "unsupported"
+          ? "Arquivo preservado; este formato não possui extração automática."
+          : record.extraction && typeof record.extraction === "object" && (record.extraction as { format?: string }).format === "zip"
+            ? "ZIP inspecionado e conteúdo compatível extraído com segurança."
+            : "Arquivo armazenado com sucesso.");
+      await load();
+    } catch (error) { onNotify(error instanceof Error ? error.message : "Falha no upload"); }
   };
 
   return <ModalShell title="Central de gestão" subtitle="Cadastros, arquivos, integrações e auditoria em um só lugar" onClose={onClose} wide className="management-modal">

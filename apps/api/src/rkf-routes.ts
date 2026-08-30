@@ -1,14 +1,18 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { parseDelimited, type ManagedStore } from "./managed-store.js";
+import { parseDelimited, resourceKinds, type ManagedStore } from "./managed-store.js";
 import { athleteMayAccess, getSession, roleAllows, sessionToken } from "./auth.js";
 import { loadRkfLibrary } from "./rkf-library.js";
 import { assessEvolutionSet, comparableKeyFor, type EvolutionSessionInput } from "./rkf-evolution.js";
 import { parseTrainingText } from "./rkf-parser.js";
-import { extractDocument } from "./document-extraction.js";
+import { DOCUMENT_UPLOAD_EXTENSIONS, extractDocument, signatureMatches } from "./document-extraction.js";
+import { openapi } from "./openapi.js";
+import { evaluateRkfReleaseGates } from "./rkf-release-gates.js";
+import { DOMAIN_EVENT_CONTRACTS, DOMAIN_EVENT_CATALOG_VERSION } from "./domain-events.js";
 import {
   AGE_BANDS, buildLoadAlerts, classifyEvolution, coldStartFor, computeChronicSeries,
   computeLoadLayers, computeMonotony, computeResponseIndex, decideAdaptation, DISTRIBUTION_MATRICES,
@@ -87,6 +91,32 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
     const dailyLoads = sessions.slice(-7).map((session) => session.pse * session.durationMinutes);
     const monotony = computeMonotony(dailyLoads);
     const latest = chronic.points.at(-1)!;
+    const organizationId = viewer?.organizationId ?? "org-demo";
+    const ingestions = (store?.list("ingestions") ?? []).filter((item) => item.organizationId === organizationId);
+    const release = evaluateRkfReleaseGates({
+      seed: {
+        located: staging.located,
+        staged: staging.staged,
+        imported,
+        sessions: "manifest" in staging ? Number(staging.manifest?.sessions ?? 0) : 0,
+        blocks: "manifest" in staging ? Number(staging.manifest?.blocks ?? 0) : 0,
+        prescriptionUnits: "manifest" in staging ? Number(staging.manifest?.prescription_units ?? 0) : 0,
+        files: staging.files.length,
+      },
+      apiContractCount: Object.keys(openapi.paths).length,
+      entityCount: resourceKinds.length,
+      migrationCount: await (store?.migrationStatus().then((status) => status.applied.length).catch(() => 0) ?? 0),
+      eventContractCount: DOMAIN_EVENT_CONTRACTS.length,
+      resultCount: (store?.list("results") ?? []).filter((item) => item.organizationId === organizationId).length,
+      loadSnapshotCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === organizationId).length,
+      postTrainingSeedCount: validationSessions().length,
+      fatigueSeedCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === organizationId && item.fatigueContext).length,
+      ingestionSeedCount: (store?.list("ingestions") ?? []).filter((item) => item.organizationId === organizationId && item.channel === "TEXT").length,
+      confirmedIngestionCount: ingestions.filter((item) => item.state === "CONFIRMED").length,
+      ingestionChannelsObserved: ingestions.map((item) => String(item.channel ?? "")),
+      auditableOriginalFormatsObserved: [...new Set(ingestions.map((item) => extname(String(item.sourceName ?? "")).slice(1).toLowerCase()).filter(Boolean))],
+      assignmentTargetTypesObserved: (store?.list("prescriptions") ?? []).filter((item) => item.organizationId === organizationId).map((item) => String(item.targetType ?? "")),
+    });
     return {
       program: { name: "RKF Coach", version: "RKF_V5.1", mode: "VALIDATION", locale: "pt-BR", poolLengthM: 50 },
       scope: { athletes: 50, entitlements: ["LOAD_ATHLETE", "LOAD_TEAM", "FULL_ATHLETE", "FULL_TEAM"] },
@@ -98,19 +128,136 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       prescriptions: { pendingApproval: store?.list("prescriptions").filter((item) => item.organizationId === (viewer?.organizationId ?? "org-demo") && item.status === "PENDING_APPROVAL").length ?? 0, published: store?.list("prescriptions").filter((item) => item.organizationId === (viewer?.organizationId ?? "org-demo") && item.status === "PUBLISHED").length ?? 0 },
       seed: { expectedSessions: 910, expectedBlocks: 6226, packageLocated: staging.located, staged: staging.staged, imported, status: imported ? "IMPORTED" : staging.staged ? "STAGING_READY" : "BLOCKED", packageHash: "packageHash" in staging ? staging.packageHash : null, reason: imported ? `Seed importada por transação ${String(governance?.seedImportId ?? "registrada")}, com ${Number(governance?.seedImportedRows ?? 0).toLocaleString("pt-BR")} linhas preservadas.` : staging.staged ? "Pacote canônico localizado e conferido em staging. Pronto para importação transacional." : staging.errors.join(" ") },
       featureFlags: { voiceIngestion: true, deviceCommands: false, wearableRead: true },
-      gates: [
-        { id: "G01", label: "Vocabulário oficial e hard rules", status: "PASS" },
-        { id: "G02", label: "Prescrição exata e auditável", status: "PASS" },
-        { id: "G03", label: "Carga interna e três camadas", status: "PASS" },
-        { id: "G04", label: "Readiness com guardrails", status: "PASS" },
-        { id: "G05", label: imported ? "Seed 910 sessões e 6.226 blocos importada" : "Seed 910 sessões e 6.226 blocos em staging", status: imported ? "PASS" : staging.staged ? "REVIEW" : "BLOCKED" },
-        { id: "G06", label: "Comandos para dispositivos", status: "FEATURE_FLAG" },
-      ],
+      release: { decision: release.decision, summary: release.summary, evaluatedAtUtc: release.evaluatedAtUtc },
+      gates: release.gates,
       provenance: { type: "SYNTHETIC_VALIDATION", label: "Dados sintéticos de validação. Não representam resultados oficiais." },
     };
   });
 
+  app.get("/api/v1/rkf/release-gates", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    const staging = seedStagingStatus();
+    const governance = store?.get("governance", "rkf-v5-1");
+    const imported = Boolean(governance?.seedImported && governance.packageHash === ("packageHash" in staging ? staging.packageHash : undefined));
+    const ingestions = (store?.list("ingestions") ?? []).filter((item) => item.organizationId === coach.organizationId);
+    return evaluateRkfReleaseGates({
+      seed: {
+        located: staging.located,
+        staged: staging.staged,
+        imported,
+        sessions: "manifest" in staging ? Number(staging.manifest?.sessions ?? 0) : 0,
+        blocks: "manifest" in staging ? Number(staging.manifest?.blocks ?? 0) : 0,
+        prescriptionUnits: "manifest" in staging ? Number(staging.manifest?.prescription_units ?? 0) : 0,
+        files: staging.files.length,
+      },
+      apiContractCount: Object.keys(openapi.paths).length,
+      entityCount: resourceKinds.length,
+      migrationCount: await (store?.migrationStatus().then((status) => status.applied.length).catch(() => 0) ?? 0),
+      eventContractCount: DOMAIN_EVENT_CONTRACTS.length,
+      resultCount: (store?.list("results") ?? []).filter((item) => item.organizationId === coach.organizationId).length,
+      loadSnapshotCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === coach.organizationId).length,
+      postTrainingSeedCount: validationSessions().length,
+      fatigueSeedCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === coach.organizationId && item.fatigueContext).length,
+      ingestionSeedCount: (store?.list("ingestions") ?? []).filter((item) => item.organizationId === coach.organizationId && item.channel === "TEXT").length,
+      confirmedIngestionCount: ingestions.filter((item) => item.state === "CONFIRMED").length,
+      ingestionChannelsObserved: ingestions.map((item) => String(item.channel ?? "")),
+      auditableOriginalFormatsObserved: [...new Set(ingestions.map((item) => extname(String(item.sourceName ?? "")).slice(1).toLowerCase()).filter(Boolean))],
+      assignmentTargetTypesObserved: (store?.list("prescriptions") ?? []).filter((item) => item.organizationId === coach.organizationId).map((item) => String(item.targetType ?? "")),
+    });
+  });
+
   app.get("/api/v1/rkf/seed/status", async () => seedStagingStatus());
+
+  app.get("/api/v1/rkf/migrations", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    const status = await store?.migrationStatus().catch(() => undefined);
+    return { migrations: status ?? { applied: [], pending: [], total: 0 }, note: status ? undefined : "Driver PostgreSQL não conectado; migrations aplicam apenas em produção." };
+  });
+
+  app.get("/api/v1/rkf/events", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    return { catalogVersion: DOMAIN_EVENT_CATALOG_VERSION, total: DOMAIN_EVENT_CONTRACTS.length, events: DOMAIN_EVENT_CONTRACTS };
+  });
+
+  app.post("/api/v1/backup", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    if (!roleAllows(user, ["coach", "admin"])) return reply.code(403).send({ error: "Backup é exclusivo da comissão técnica" });
+    try {
+      const backup = await store?.createBackup();
+      if (!backup) return reply.code(503).send({ error: "Backup requer o driver PostgreSQL" });
+      return backup;
+    } catch (error) {
+      return reply.code(500).send({ error: "Falha ao criar backup", detail: error instanceof Error ? error.message : undefined });
+    }
+  });
+
+  app.get("/api/v1/backup/:id/verify", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    if (!roleAllows(user, ["coach", "admin"])) return reply.code(403).send({ error: "Verificação é exclusiva da comissão técnica" });
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    try {
+      const verification = await store?.verifyBackup(id);
+      if (!verification) return reply.code(503).send({ error: "Backup requer o driver PostgreSQL" });
+      return verification;
+    } catch (error) {
+      return reply.code(500).send({ error: "Falha ao verificar backup", detail: error instanceof Error ? error.message : undefined });
+    }
+  });
+
+  /** LGPD: exportação completa dos dados de um atleta da organização. */
+  app.get("/api/v1/lgpd/athletes/:athleteId/export", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    const { athleteId } = z.object({ athleteId: z.string() }).parse(request.params);
+    if (!roleAllows(user, ["coach", "admin"]) && !athleteMayAccess(user, athleteId)) return reply.code(403).send({ error: "Acesso restrito aos próprios dados" });
+    const organizationId = user.organizationId;
+    const scoped = (items: Array<Record<string, unknown>> | undefined) => (items ?? []).filter((item) => (String(item.organizationId ?? "org-demo")) === organizationId);
+    const athlete = scoped(store?.list("athletes"))?.find((item) => item.id === athleteId);
+    if (!athlete) return reply.code(404).send({ error: "Atleta não encontrado nesta organização" });
+    const relates = (items: Array<Record<string, unknown>> | undefined) => scoped(items)?.filter((item) => item.athleteId === athleteId) ?? [];
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      basis: "LGPD art. 18, II — portabilidade de dados",
+      athlete,
+      goals: relates(store?.list("goals")),
+      videos: relates(store?.list("videos")),
+      activities: relates(store?.list("activities")),
+      ingestions: relates(store?.list("ingestions")),
+      prescriptions: relates(store?.list("prescriptions")),
+      results: relates(store?.list("results")),
+      loadSnapshots: relates(store?.list("loadSnapshots")),
+      adaptationDecisions: relates(store?.list("adaptationDecisions")),
+      audit: scoped(store?.list("governance")),
+    };
+    return payload;
+  });
+
+  /** LGPD: anonimização do atleta — dados metodológicos são preservados, PII removida. */
+  app.post("/api/v1/lgpd/athletes/:athleteId/anonymize", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    const { athleteId } = z.object({ athleteId: z.string() }).parse(request.params);
+    const body = z.object({ requestedBy: z.string().email(), lgpdBasis: z.enum(["CONSENTIMENTO", "CUMPRIMENTO_LEGAL", "DIREITOS_TITULAR"]) }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "Requisição de anonimização inválida", details: body.error.flatten() });
+    const athlete = (store?.list("athletes") ?? []).find((item) => item.id === athleteId && item.organizationId === coach.organizationId);
+    if (!athlete) return reply.code(404).send({ error: "Atleta não encontrado nesta organização" });
+    const anonymized = store?.update("athletes", athleteId, {
+      name: `Atleta anonimizado ${athleteId}`,
+      email: undefined,
+      handle: undefined,
+      status: "anonymized",
+      anonymizedAt: new Date().toISOString(),
+      anonymizedBy: coach.id,
+      lgpdBasis: body.data.lgpdBasis,
+      lgpdRequestedBy: body.data.requestedBy,
+    }, "update");
+    return { ok: true, athlete: anonymized, note: "Carga, resultados e snapshots preservados sem PII; métricas permanecem auditáveis." };
+  });
 
   app.post("/api/v1/rkf/seed/stage", async (request, reply) => {
     const coach = await requireCoach(request, reply);
@@ -207,6 +354,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
     let original: string;
     let sourceName: string | undefined;
     let confidenceOverride: number | undefined;
+    let originalContentHash: string | undefined;
     let parsedData: Record<string, unknown> = {};
     let extraction: Awaited<ReturnType<typeof extractDocument>> | undefined;
     const pipelineStates = ["RECEIVED", "STORED"];
@@ -241,6 +389,10 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       if (!["PHOTO", "FILE", "VOICE"].includes(channel)) return reply.code(400).send({ error: "Upload multipart exige canal PHOTO, FILE ou VOICE" });
       const buffer = fileBuffer;
       if (buffer.length > 25 * 1024 * 1024) return reply.code(413).send({ error: "Arquivo deve ter no máximo 25 MB" });
+      const extension = extname(fileFilename).toLowerCase();
+      if (!DOCUMENT_UPLOAD_EXTENSIONS.includes(extension as (typeof DOCUMENT_UPLOAD_EXTENSIONS)[number])) return reply.code(415).send({ error: `Formato ${extension || "desconhecido"} não permitido para ingestão documental` });
+      if (!signatureMatches(buffer, extension)) return reply.code(415).send({ error: "O conteúdo do arquivo não corresponde à extensão informada" });
+      originalContentHash = createHash("sha256").update(buffer).digest("hex");
       original = `arquivo:${fileFilename}:${buffer.length} bytes`;
       void file;
       if (channel !== "VOICE") {
@@ -291,7 +443,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       channel,
       sourceName: sourceName ?? "entrada-direta",
       original,
-      originalHash: createHash("sha256").update(original).digest("hex"),
+      originalHash: originalContentHash ?? createHash("sha256").update(original).digest("hex"),
       parsedData,
       confidence: Math.round(Math.min(Math.max(confidence, 0), 1) * 100) / 100,
       requiresHumanReview: confidence < 0.85,
@@ -299,6 +451,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       version: 1,
       pipeline: [...pipelineStates, "REVIEW"],
       extractionStatus: extraction?.status,
+      extraction,
       status: "review",
       organizationId: coach.organizationId,
       actorId: coach.id,

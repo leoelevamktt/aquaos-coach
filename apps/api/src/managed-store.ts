@@ -197,6 +197,21 @@ export class ManagedStore {
     this.remove("authSessions", tokenHash);
   }
 
+  async migrationStatus(): Promise<{ applied: string[]; pending: string[]; total: number; lastAppliedAt?: string }> {
+    if (this.postgres) return this.postgres.migrationStatus();
+    return { applied: [], pending: [], total: 0, lastAppliedAt: undefined };
+  }
+
+  async createBackup() {
+    if (this.postgres) return this.postgres.createBackup();
+    throw new Error("Backup requer o driver PostgreSQL");
+  }
+
+  async verifyBackup(backupId: string) {
+    if (this.postgres) return this.postgres.verifyBackup(backupId);
+    throw new Error("Backup requer o driver PostgreSQL");
+  }
+
   list(kind: ResourceKind) { return this.data.resources[kind].slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); }
   get(kind: ResourceKind, id: string) { return this.data.resources[kind].find((item) => item.id === id); }
   audit(limit = 100) { return this.data.audit.slice(-limit).reverse(); }

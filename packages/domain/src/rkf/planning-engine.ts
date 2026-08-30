@@ -60,6 +60,16 @@ export interface PlanningRequest {
   recentSessionIds?: readonly string[];
 }
 
+export interface LibrarySessionUnit {
+  setId: string;
+  setOrder: number;
+  reps?: number;
+  distanceM?: number;
+  atomization?: string;
+  sourceFidelity?: string;
+  executable: boolean;
+}
+
 export interface LibrarySessionBlock {
   component: SessionComponent;
   volumeM: number;
@@ -67,6 +77,20 @@ export interface LibrarySessionBlock {
   prescriptionText?: string;
   materials?: MaterialCode[];
   skills?: SkillCode[];
+  units?: LibrarySessionUnit[];
+}
+
+export interface LibrarySessionNormalization {
+  status?: string;
+  method?: string;
+  volumeM?: number;
+}
+
+export interface LibrarySessionVolumeAudit {
+  auditedM?: number;
+  blockSumM?: number;
+  differenceM?: number;
+  reconciled?: boolean;
 }
 
 export interface LibrarySession {
@@ -81,6 +105,8 @@ export interface LibrarySession {
   blocks: readonly LibrarySessionBlock[];
   machineStatus?: string;
   appSelectable?: boolean;
+  normalization?: LibrarySessionNormalization;
+  volumeAudit?: LibrarySessionVolumeAudit;
 }
 
 export interface ComposedBlock {

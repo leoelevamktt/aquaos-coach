@@ -7,7 +7,7 @@ import { z } from "zod";
 import { analyzeVideo } from "./video-analysis.js";
 import { ManagedStore, parseDelimited, resourceKinds, type ResourceKind } from "./managed-store.js";
 import { athleteMayAccess, getSession, roleAllows, sessionToken } from "./auth.js";
-import { extractDocument, signatureMatches } from "./document-extraction.js";
+import { DOCUMENT_UPLOAD_EXTENSIONS, extractDocument, signatureMatches } from "./document-extraction.js";
 import { pipeline } from "node:stream/promises";
 
 export const uploadRoot = process.env.STORAGE_PATH
@@ -94,7 +94,7 @@ export function registerOperationalRoutes(app: FastifyInstance, store: ManagedSt
     const file = await request.file();
     if (!file) return reply.code(400).send({ error: "Selecione um arquivo" });
     const extension = extname(file.filename).toLowerCase();
-    const allowed = [".mp4", ".mov", ".m4v", ".pdf", ".csv", ".json", ".fit", ".txt", ".jpg", ".jpeg", ".png", ".heic", ".doc", ".docx", ".xls", ".xlsx"];
+    const allowed = [".mp4", ".mov", ".m4v", ".fit", ...DOCUMENT_UPLOAD_EXTENSIONS];
     if (!allowed.includes(extension)) return reply.code(415).send({ error: `Formato ${extension || "desconhecido"} não permitido` });
     const filename = `${Date.now()}-${safeName(file.filename)}`;
     if (user.role === "athlete" && query.data.athleteId && !athleteMayAccess(user, query.data.athleteId)) return reply.code(403).send({ error: "Atleta só pode anexar arquivos ao próprio prontuário" });

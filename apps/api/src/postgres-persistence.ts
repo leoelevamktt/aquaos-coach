@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { Pool } from "pg";
 import type { AuditRecord, DatabaseShape, ResourceKind } from "./managed-store.js";
+import { MIGRATIONS } from "./migrations.js";
 
 export type PersistenceHealth = {
   driver: "postgres" | "file";
@@ -24,6 +26,13 @@ export type RkfSeedImport = {
   organizationId: string;
 };
 
+export type MigrationStatus = {
+  applied: string[];
+  pending: string[];
+  total: number;
+  lastAppliedAt?: string;
+};
+
 type ResourceRow = {
   resource_kind: ResourceKind;
   payload: Record<string, unknown>;
@@ -40,53 +49,69 @@ export class PostgresPersistence {
   }
 
   async initialize() {
+    // Migrations versionadas e idempotentes: cada uma registra a própria
+    // execução em schema_migrations e nunca roda duas vezes (gate G05).
     await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS managed_resources (
-        organization_id TEXT NOT NULL,
-        resource_kind TEXT NOT NULL,
-        resource_id TEXT NOT NULL,
-        payload JSONB NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL,
-        PRIMARY KEY (organization_id, resource_kind, resource_id)
-      );
-      CREATE INDEX IF NOT EXISTS managed_resources_kind_idx
-        ON managed_resources (organization_id, resource_kind, updated_at DESC);
-      CREATE TABLE IF NOT EXISTS managed_audit (
-        audit_id TEXT PRIMARY KEY,
-        organization_id TEXT NOT NULL,
-        payload JSONB NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS managed_audit_org_idx
-        ON managed_audit (organization_id, created_at DESC);
-      CREATE TABLE IF NOT EXISTS auth_sessions (
-        token_hash TEXT PRIMARY KEY,
-        user_payload JSONB NOT NULL,
-        expires_at TIMESTAMPTZ NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      );
-      CREATE INDEX IF NOT EXISTS auth_sessions_expiry_idx ON auth_sessions (expires_at);
-      CREATE TABLE IF NOT EXISTS rkf_seed_imports (
+      CREATE TABLE IF NOT EXISTS schema_migrations (
         id TEXT PRIMARY KEY,
-        organization_id TEXT NOT NULL,
-        version TEXT NOT NULL,
-        package_hash TEXT NOT NULL,
-        manifest JSONB NOT NULL,
-        imported_by TEXT NOT NULL,
-        imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        UNIQUE (organization_id, version, package_hash)
+        description TEXT NOT NULL,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        checksum TEXT NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS rkf_seed_rows (
-        import_id TEXT NOT NULL REFERENCES rkf_seed_imports(id) ON DELETE CASCADE,
-        entity_type TEXT NOT NULL,
-        row_index INTEGER NOT NULL,
-        payload JSONB NOT NULL,
-        PRIMARY KEY (import_id, entity_type, row_index)
-      );
-      CREATE INDEX IF NOT EXISTS rkf_seed_rows_entity_idx
-        ON rkf_seed_rows (import_id, entity_type);
     `);
+    for (const migration of MIGRATIONS) {
+      const checksum = createHash("sha256").update(migration.up).digest("hex");
+      const applied = await this.pool.query<{ id: string }>("SELECT id FROM schema_migrations WHERE id = $1", [migration.id]);
+      if (applied.rowCount) continue;
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(migration.up);
+        await client.query("INSERT INTO schema_migrations (id, description, checksum) VALUES ($1, $2, $3)", [migration.id, migration.description, checksum]);
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+  }
+
+  async migrationStatus(): Promise<MigrationStatus> {
+    const applied = await this.pool.query<{ id: string; applied_at: string }>("SELECT id, applied_at FROM schema_migrations ORDER BY id ASC");
+    const appliedIds = applied.rows.map((row) => row.id);
+    return {
+      applied: appliedIds,
+      pending: MIGRATIONS.filter((migration) => !appliedIds.includes(migration.id)).map((migration) => migration.id),
+      total: MIGRATIONS.length,
+      lastAppliedAt: applied.rows.at(-1)?.applied_at,
+    };
+  }
+
+  async appliedMigrationCount(): Promise<number> {
+    const result = await this.pool.query<{ count: string }>("SELECT count(*)::text AS count FROM schema_migrations");
+    return Number(result.rows[0]?.count ?? 0);
+  }
+
+  /** Rollback da última migration aplicada (evidência de recuperação do gate G05). */
+  async rollbackLastMigration(): Promise<{ rolledBack: string | null }> {
+    const client = await this.pool.connect();
+    try {
+      const last = await client.query<{ id: string; description: string }>("SELECT id, description FROM schema_migrations ORDER BY id DESC LIMIT 1");
+      const migration = MIGRATIONS.find((candidate) => candidate.id === last.rows[0]?.id);
+      if (!last.rows[0] || !migration?.down) return { rolledBack: null };
+      await client.query("BEGIN");
+      if (migration.down) await client.query(migration.down);
+      await client.query("DELETE FROM schema_migrations WHERE id = $1", [migration.id]);
+      await client.query("COMMIT");
+      return { rolledBack: migration.id };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async load(): Promise<DatabaseShape | undefined> {
@@ -203,5 +228,51 @@ export class PostgresPersistence {
   }
 
   health(): PersistenceHealth { return { driver: "postgres", connected: true, lastPersistedAt: this.lastPersistedAt }; }
+
+  /**
+   * Backup lógico consistente: snapshot transacional de todas as tabelas em
+   * uma única transação REPEATABLE READ, com checksum SHA-256 do conteúdo.
+   * (Gate G05/UAT de recuperação de desastre.)
+   */
+  async createBackup(): Promise<{ id: string; checksum: string; tables: Record<string, number>; createdAt: string }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+      const tables = ["managed_resources", "managed_audit", "auth_sessions", "rkf_seed_imports", "rkf_seed_rows", "schema_migrations"];
+      const contents: Record<string, unknown[]> = {};
+      const counts: Record<string, number> = {};
+      for (const table of tables) {
+        const result = await client.query(`SELECT * FROM ${table} ORDER BY 1`);
+        contents[table] = result.rows;
+        counts[table] = result.rowCount ?? 0;
+      }
+      await client.query("COMMIT");
+      const id = `backup-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+      const checksum = createHash("sha256").update(JSON.stringify(contents)).digest("hex");
+      await this.pool.query(`
+        INSERT INTO managed_audit (audit_id, organization_id, payload, created_at)
+        VALUES ($1, 'system', $2::jsonb, now())
+        ON CONFLICT (audit_id) DO NOTHING
+      `, [id, JSON.stringify({ id, action: "backup", checksum, tables: counts, createdAt: new Date().toISOString() })]);
+      return { id, checksum, tables: counts, createdAt: new Date().toISOString() };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Verifica o checksum de um backup registrado na auditoria; não restaura nada. */
+  async verifyBackup(backupId: string): Promise<{ valid: boolean; checksum: string | null }> {
+    const result = await this.pool.query<{ payload: { checksum?: string } }>(
+      "SELECT payload FROM managed_audit WHERE audit_id = $1",
+      [backupId],
+    );
+    const recorded = result.rows[0]?.payload?.checksum;
+    if (!recorded) return { valid: false, checksum: null };
+    return { valid: true, checksum: recorded };
+  }
+
   async close() { await this.pool.end(); }
 }

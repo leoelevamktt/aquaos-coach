@@ -2,14 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  Activity, AlertTriangle, ArrowRight, BookOpenCheck, Check, ChevronRight, CircleCheck,
-  ClipboardCheck, Database, FileUp, Gauge, History, Layers3, LoaderCircle, LockKeyhole,
-  Mic, Network, RefreshCw, Save, ShieldCheck, Sparkles, Upload, Waves,
+  Activity, AlertTriangle, Archive, ArrowRight, BookOpenCheck, Check, ChevronRight, CircleCheck,
+  ClipboardCheck, Database, FileCheck2, FileSpreadsheet, FileText, FileUp, FolderArchive, Gauge,
+  History, Layers3, LoaderCircle, LockKeyhole, Mic, Network, PencilLine, RefreshCw, Save,
+  ShieldCheck, Sparkles, Upload, Waves, X,
 } from "lucide-react";
 import { apiRequest, uploadFile } from "./api";
 import { PageTitle, SectionHead } from "./components";
 
-type Tab = "command" | "load" | "prescription" | "ingestion" | "governance";
+type Tab = "command" | "load" | "prescription" | "ingestion" | "materials" | "governance";
 type Bootstrap = {
   program: { name: string; version: string; mode: string };
   athlete: { id: string; name: string; age: number; specialty: string; readiness: number };
@@ -26,7 +27,7 @@ type Bootstrap = {
   prescriptions: { pendingApproval: number; published: number };
   seed: { expectedSessions: number; expectedBlocks: number; packageLocated: boolean; staged: boolean; imported: boolean; status: string; packageHash: string | null; reason: string };
   featureFlags: Record<string, boolean>;
-  gates: { id: string; label: string; status: string }[];
+  gates: { id: string; label: string; status: string; evidence?: string; detail?: string }[];
   provenance: { label: string };
 };
 
@@ -40,12 +41,78 @@ type Prescription = {
   prescription?: { totalVolumeM?: number; primaryZone?: string; blocks?: Array<{ component: string; volumeM: number; zone: string; prescriptionText: string }> };
 };
 
+type SeedCoverage = {
+  version: string;
+  status: string;
+  totalRows: number;
+  operationalFiles: number;
+  reviewFiles: number;
+  files: Array<{
+    name: string;
+    label: string;
+    rows: number;
+    columns: string[];
+    integrity: string;
+    activation: string;
+    use: string;
+  }>;
+};
+
+type GovernanceDecision = {
+  id: string;
+  title: string;
+  status: "PASS" | "REVIEW" | "BLOCKED" | "DEFERRED";
+  decision?: string;
+  evidence: string[];
+  owner: string;
+  updatedAt?: string;
+};
+
+type DecisionRegister = {
+  revision: number;
+  status: CoverageStatus;
+  summary: { total: number; pass: number; review: number; blocked: number; deferred: number };
+  decisions: GovernanceDecision[];
+};
+
 const tabs: Array<{ id: Tab; label: string; icon: typeof Activity }> = [
   { id: "command", label: "Comando", icon: Network },
   { id: "load", label: "Controle de carga", icon: Activity },
   { id: "prescription", label: "Prescritor", icon: ClipboardCheck },
   { id: "ingestion", label: "Ingestão", icon: FileUp },
+  { id: "materials", label: "Cobertura", icon: FileCheck2 },
   { id: "governance", label: "Governança", icon: ShieldCheck },
+];
+
+type CoverageStatus = "PASS" | "REVIEW" | "BLOCKED";
+
+const seedCollections: Array<{ label: string; files: string; rows: number; status: CoverageStatus; note: string }> = [
+  { label: "Sessões", files: "sessions.csv", rows: 910, status: "PASS", note: "Biblioteca canônica preservada e consultável." },
+  { label: "Blocos", files: "blocks.csv", rows: 6226, status: "PASS", note: "Blocos vinculados às 910 sessões." },
+  { label: "Unidades de prescrição", files: "prescription_units.csv", rows: 6226, status: "REVIEW", note: "3.026 unidades exigem revisão de completude ou atomização." },
+  { label: "Auditoria e resumos", files: "normalization_audit.csv + block_summary.csv", rows: 1820, status: "REVIEW", note: "Dados preservados; parte das colunas ainda não dirige telas ou regras." },
+  { label: "Dicionários metodológicos", files: "zones.csv + materials.csv + skills.csv", rows: 31, status: "PASS", note: "6 zonas, 11 materiais e 14 habilidades disponíveis." },
+  { label: "Regras e exercícios", files: "rules_rkf.csv + exercises.csv", rows: 33, status: "REVIEW", note: "18 regras e 15 exercícios importados; cobertura executável segue em validação." },
+];
+
+const formatCoverage: Array<{ format: string; scope: string; status: CoverageStatus; limitation: string }> = [
+  { format: "CSV", scope: "Dados estruturados", status: "PASS", limitation: "Importação disponível para recursos compatíveis com o esquema." },
+  { format: "FIT", scope: "Atividade esportiva", status: "PASS", limitation: "Converte atividade real para o fluxo de execução." },
+  { format: "JSON", scope: "Integrações internas", status: "REVIEW", limitation: "Aceito apenas nos contratos e recursos já definidos." },
+  { format: "XLSX", scope: "Planilhas modernas", status: "REVIEW", limitation: "Extrai abas e prévia; não converte toda fórmula em regra executável." },
+  { format: "PDF / DOCX", scope: "Documentos textuais", status: "REVIEW", limitation: "Extrai texto; exige revisão humana para virar metodologia." },
+  { format: "ZIP", scope: "Pacote RKF V5.1", status: "REVIEW", limitation: "Pacote canônico incorporado; importador genérico de arquivos ZIP não está homologado." },
+  { format: "PDF escaneado / imagem", scope: "OCR", status: "BLOCKED", limitation: "Preservado para processamento; OCR em português ainda não homologado." },
+  { format: "XLS / DOC", scope: "Formatos legados", status: "BLOCKED", limitation: "Preservação disponível, sem extração confiável." },
+];
+
+const pendingDecisions: Array<{ id: string; title: string; status: CoverageStatus; detail: string }> = [
+  { id: "DEC-01", title: "Versão canônica V5.0 ou V5.1", status: "BLOCKED", detail: "A V5.1 está carregada, mas a decisão metodológica final precisa ser formalizada." },
+  { id: "DEC-02", title: "Atomização das unidades", status: "REVIEW", detail: "O campo set_order uniforme impede tratar todas as unidades como séries totalmente atomizadas." },
+  { id: "DEC-03", title: "Campos incompletos", status: "REVIEW", detail: "3.026 unidades sem distância ou repetições precisam de política explícita de representação." },
+  { id: "DEC-04", title: "Agregação diária e EWMA", status: "REVIEW", detail: "Falta homologar sessões múltiplas no mesmo dia e a janela oficial de carga crônica." },
+  { id: "DEC-05", title: "Convenção de TSB", status: "REVIEW", detail: "A ordem CTL menos ATL deve ser confirmada nos casos históricos aprovados." },
+  { id: "DEC-06", title: "Retenção e descarte LGPD", status: "BLOCKED", detail: "Prazos, anonimização e descarte de dados de saúde ainda exigem política formal." },
 ];
 
 const formatNumber = (value: number | null | undefined, suffix = "") => value === null || value === undefined
@@ -62,17 +129,21 @@ export function RkfOperations({ onNotify }: { onNotify: (message: string) => voi
   const [data, setData] = useState<Bootstrap>();
   const [ingestions, setIngestions] = useState<Ingestion[]>([]);
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
+  const [seedCoverage, setSeedCoverage] = useState<SeedCoverage>();
+  const [decisionRegister, setDecisionRegister] = useState<DecisionRegister>();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
   const refresh = async () => {
     try {
-      const [bootstrap, ingestionList, prescriptionList] = await Promise.all([
+      const [bootstrap, ingestionList, prescriptionList, coverage, decisions] = await Promise.all([
         apiRequest<Bootstrap>("/api/v1/rkf/bootstrap"),
         apiRequest<{ data: Ingestion[] }>("/api/v1/rkf/ingestions"),
         apiRequest<{ data: Prescription[] }>("/api/v1/rkf/prescriptions"),
+        apiRequest<SeedCoverage>("/api/v1/rkf/seed/files").catch(() => undefined),
+        apiRequest<DecisionRegister>("/api/v1/rkf/governance/decisions").catch(() => undefined),
       ]);
-      setData(bootstrap); setIngestions(ingestionList.data); setPrescriptions(prescriptionList.data); setError("");
+      setData(bootstrap); setIngestions(ingestionList.data); setPrescriptions(prescriptionList.data); setSeedCoverage(coverage); setDecisionRegister(decisions); setError("");
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Falha ao carregar o núcleo RKF"); }
   };
   useEffect(() => {
@@ -95,15 +166,18 @@ export function RkfOperations({ onNotify }: { onNotify: (message: string) => voi
       <button className="secondary-button" onClick={() => void refresh()}><RefreshCw size={16} />Atualizar</button>
     </PageTitle>
     <div className="rkf-provenance"><ShieldCheck size={17} /><span><strong>Origem declarada</strong>{data.provenance.label}</span></div>
-    <nav className="rkf-tabs" aria-label="Módulos RKF">
-      {tabs.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}><item.icon size={17} />{item.label}</button>)}
+    <nav className="rkf-tabs" aria-label="Módulos RKF" role="tablist">
+      {tabs.map((item) => <button key={item.id} id={`rkf-tab-${item.id}`} type="button" role="tab" aria-selected={tab === item.id} aria-controls={`rkf-panel-${item.id}`} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}><item.icon aria-hidden="true" size={17} />{item.label}</button>)}
     </nav>
 
-    {tab === "command" && <Command data={data} setTab={setTab} ingestions={ingestions} prescriptions={prescriptions} />}
-    {tab === "load" && <LoadControl data={data} />}
-    {tab === "prescription" && <PrescriptionStudio data={data} prescriptions={prescriptions} busy={busy} setBusy={setBusy} refresh={refresh} onNotify={onNotify} />}
-    {tab === "ingestion" && <IngestionStudio ingestions={ingestions} busy={busy} setBusy={setBusy} refresh={refresh} onNotify={onNotify} />}
-    {tab === "governance" && <Governance data={data} busy={busy} setBusy={setBusy} refresh={refresh} onNotify={onNotify} />}
+    <div id={`rkf-panel-${tab}`} role="tabpanel" aria-labelledby={`rkf-tab-${tab}`}>
+      {tab === "command" && <Command data={data} setTab={setTab} ingestions={ingestions} prescriptions={prescriptions} />}
+      {tab === "load" && <LoadControl data={data} />}
+      {tab === "prescription" && <PrescriptionStudio data={data} prescriptions={prescriptions} busy={busy} setBusy={setBusy} refresh={refresh} onNotify={onNotify} />}
+      {tab === "ingestion" && <IngestionStudio ingestions={ingestions} busy={busy} setBusy={setBusy} refresh={refresh} onNotify={onNotify} />}
+      {tab === "materials" && <MaterialsCoverage data={data} coverage={seedCoverage} decisionRegister={decisionRegister} setTab={setTab} />}
+      {tab === "governance" && <Governance data={data} decisionRegister={decisionRegister} busy={busy} setBusy={setBusy} refresh={refresh} onNotify={onNotify} />}
+    </div>
   </>;
 }
 
@@ -244,7 +318,89 @@ function IngestionStudio({ ingestions, busy, setBusy, refresh, onNotify }: { ing
   </div>;
 }
 
-function Governance({ data, busy, setBusy, refresh, onNotify }: { data: Bootstrap; busy: string; setBusy: (value: string) => void; refresh: () => Promise<void>; onNotify: (message: string) => void }) {
+function MaterialsCoverage({ data, coverage, decisionRegister, setTab }: { data: Bootstrap; coverage?: SeedCoverage; decisionRegister?: DecisionRegister; setTab: (tab: Tab) => void }) {
+  const seedStatus: CoverageStatus = data.seed.imported ? "PASS" : data.seed.staged ? "REVIEW" : "BLOCKED";
+  const gateCounts = data.gates.reduce((counts, gate) => {
+    if (gate.status === "PASS") counts.pass += 1;
+    else if (gate.status === "BLOCKED") counts.blocked += 1;
+    else counts.review += 1;
+    return counts;
+  }, { pass: 0, review: 0, blocked: 0 });
+  const decisionsForCoverage = decisionRegister?.decisions.filter((item) => item.status !== "PASS") ?? pendingDecisions;
+  const releaseStatus: CoverageStatus = gateCounts.blocked > 0 || decisionsForCoverage.some((item) => item.status === "BLOCKED") ? "BLOCKED" : gateCounts.review > 0 || decisionsForCoverage.length > 0 ? "REVIEW" : "PASS";
+  const liveFiles = coverage?.files.map((file) => ({
+    label: file.label,
+    files: file.name,
+    rows: file.rows,
+    columns: file.columns.length,
+    status: (file.integrity === "PASS" && file.activation === "OPERATIONAL" ? "PASS" : file.integrity === "BLOCKED" ? "BLOCKED" : "REVIEW") as CoverageStatus,
+    note: file.use,
+  }));
+  const files = liveFiles ?? seedCollections.map((item) => ({ ...item, columns: undefined }));
+  const totalRows = coverage?.totalRows ?? 15246;
+  const operationalFiles = coverage?.operationalFiles ?? 9;
+  const reviewFiles = coverage?.reviewFiles ?? 1;
+
+  return <div className="rkf-coverage" aria-label="Cobertura dos materiais RKF">
+    <section className="rkf-coverage-summary">
+      <div className="rkf-coverage-title">
+        <span className="rkf-coverage-icon"><Archive aria-hidden="true" size={22} /></span>
+        <div><h2>Inventário técnico dos materiais</h2><p>Presença no pacote, ativação no produto e evidência de homologação são avaliadas separadamente.</p></div>
+        <Status value={releaseStatus} />
+      </div>
+      <div className="rkf-coverage-metrics" aria-label="Resumo da cobertura">
+        <article><small>REGISTROS PRESERVADOS</small><strong>{new Intl.NumberFormat("pt-BR").format(totalRows)}</strong><span>10 arquivos tabulares</span></article>
+        <article><small>ARQUIVOS OPERACIONAIS</small><strong>{operationalFiles}<em>/10</em></strong><span>{reviewFiles} arquivo em revisão</span></article>
+        <article><small>GATES DA API</small><strong>{gateCounts.pass}<em> PASS</em></strong><span>{gateCounts.review} em revisão, {gateCounts.blocked} bloqueados</span></article>
+        <article><small>STATUS DA SEED</small><Status value={seedStatus} /><span>{data.seed.imported ? "Importada com transação registrada" : data.seed.reason}</span></article>
+      </div>
+      <div className="rkf-coverage-notice"><AlertTriangle aria-hidden="true" size={18} /><p><strong>Leitura correta do status</strong> Integridade dos arquivos não significa homologação integral da metodologia. O produto permanece bloqueado enquanto decisões críticas não tiverem evidência aprovada.</p></div>
+    </section>
+
+    <section className="card rkf-material-files">
+      <SectionHead title="Pacote RKF V5.1" subtitle="Contagens, uso atual e limitações por arquivo" />
+      <div className="rkf-file-grid">
+        {files.map((file) => <article key={file.files}>
+          <div className="rkf-file-heading"><FileSpreadsheet aria-hidden="true" size={19} /><span><strong>{file.label}</strong><small>{file.files}</small></span><Status value={file.status} /></div>
+          <p>{file.note}</p>
+          <div><span><b>{new Intl.NumberFormat("pt-BR").format(file.rows)}</b> linhas</span>{file.columns !== undefined && <span><b>{file.columns}</b> colunas</span>}</div>
+        </article>)}
+      </div>
+      <p className="rkf-package-footnote"><FolderArchive aria-hidden="true" size={16} />O manifesto e o arquivo ZIP compõem a proveniência do pacote. As 15.246 linhas pertencem aos 10 arquivos tabulares acima.</p>
+    </section>
+
+    <section className="card rkf-evidence-panel">
+      <div className="rkf-panel-heading"><SectionHead title="Evidências recebidas da API" subtitle="Estados reportados pelo núcleo no carregamento atual" /><button type="button" className="secondary-button compact" onClick={() => setTab("governance")}>Abrir governança <ChevronRight size={15} /></button></div>
+      <div className="rkf-evidence-grid">
+        {data.gates.map((gate) => <article key={gate.id}>
+          <span>{gate.id}</span><div><strong>{gate.label}</strong><p>{gate.evidence ?? gate.detail ?? "Status informado pelo endpoint de bootstrap RKF."}</p></div><Status value={gate.status} />
+        </article>)}
+      </div>
+      <div className="rkf-api-source"><ShieldCheck aria-hidden="true" size={17} /><span><strong>Proveniência da leitura</strong>{data.provenance.label}</span></div>
+    </section>
+
+    <section className="card rkf-format-coverage">
+      <SectionHead title="Cobertura de importação" subtitle="O que entra hoje e o que ainda depende de revisão ou infraestrutura" />
+      <div className="rkf-format-grid">
+        {formatCoverage.map((item) => <article key={item.format}>
+          <div><FileText aria-hidden="true" size={18} /><span><strong>{item.format}</strong><small>{item.scope}</small></span></div>
+          <p>{item.limitation}</p><Status value={item.status} />
+        </article>)}
+      </div>
+    </section>
+
+    <section className="card rkf-pending-decisions">
+      <SectionHead title="Decisões pendentes" subtitle="Itens que impedem declarar paridade total ou prontidão de produção" />
+      <div>
+        {decisionsForCoverage.map((item) => <article key={item.id}>
+          <span>{item.id}</span><div><strong>{item.title}</strong><p>{"evidence" in item ? item.evidence[0] ?? item.decision ?? "Evidência pendente." : item.detail}</p>{"owner" in item && <small>Responsável: {item.owner}</small>}</div><Status value={item.status} />
+        </article>)}
+      </div>
+    </section>
+  </div>;
+}
+
+function Governance({ data, decisionRegister, busy, setBusy, refresh, onNotify }: { data: Bootstrap; decisionRegister?: DecisionRegister; busy: string; setBusy: (value: string) => void; refresh: () => Promise<void>; onNotify: (message: string) => void }) {
   const stageSeed = async () => {
     setBusy("seed");
     try { await apiRequest("/api/v1/rkf/seed/stage", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); await refresh(); onNotify("Pacote RKF V5.1 conferido: 910 sessões e 6.226 blocos no staging imutável."); } catch (requestError) { onNotify(requestError instanceof Error ? requestError.message : "Falha ao conferir o staging"); } finally { setBusy(""); }
@@ -264,6 +420,6 @@ function Governance({ data, busy, setBusy, refresh, onNotify }: { data: Bootstra
       <article className="card rkf-seed-card"><Database size={22} /><small>SEED CANÔNICO</small><strong>{data.seed.expectedSessions} sessões</strong><p>{new Intl.NumberFormat("pt-BR").format(data.seed.expectedBlocks)} blocos esperados</p><Status value={data.seed.status} />{data.seed.packageHash && <p className="rkf-seed-hash">SHA-256 {data.seed.packageHash.slice(0, 18)}…</p>}<div>{data.seed.staged ? <CircleCheck size={16} /> : <AlertTriangle size={16} />}{data.seed.reason}</div><button className="secondary-button" disabled={Boolean(busy)} onClick={() => void stageSeed()}>{busy === "seed" ? <LoaderCircle className="spin" size={16} /> : <ShieldCheck size={16} />}Conferir staging</button>{data.seed.staged && !data.seed.imported && <button className="primary-button" disabled={Boolean(busy)} onClick={() => void importSeed()}>{busy === "seed-import" ? <LoaderCircle className="spin" size={16} /> : <Database size={16} />}Importar seed</button>}</article>
       <article className="card rkf-entitlement-card"><Layers3 size={21} /><small>ENTITLEMENTS ATIVOS</small>{["LOAD ATHLETE", "LOAD TEAM", "FULL ATHLETE", "FULL TEAM"].map((item) => <span key={item}><Check size={14} />{item}</span>)}</article>
     </aside>
-      <section className="card rkf-decisions"><SectionHead title="Registro de decisões" subtitle="Conflitos metodológicos permanecem explícitos até homologação" /><article><span>DEC 01</span><div><strong>Mapeamento de zonas em REDUZIR FORTE</strong><p>Seção 18 é a convenção primária. Workbook 32.6 permanece disponível como variante versionada.</p></div><Status value="REVIEW" /></article><article><span>DEC 02</span><div><strong>Seed RKF V5.1</strong><p>{data.seed.imported ? "Pacote canônico importado com hash, contagens e proveniência preservados." : "Staging conferido. A importação transacional está pronta para execução controlada."}</p></div><Status value={data.seed.imported ? "PASS" : "REVIEW"} /></article><article><span>DEC 03</span><div><strong>Comandos em dispositivos</strong><p>O envio permanece sob feature flag até contratos e autorização dos fabricantes.</p></div><Status value="FEATURE_FLAG" /></article></section>
+      <section className="card rkf-decisions"><SectionHead title="Registro de decisões" subtitle={decisionRegister ? `${decisionRegister.summary.total} decisões formais, revisão ${decisionRegister.revision}` : "Conflitos metodológicos permanecem explícitos até homologação"} />{decisionRegister ? decisionRegister.decisions.map((item) => <article key={item.id}><span>{item.id}</span><div><strong>{item.title}</strong><p>{item.decision ?? item.evidence[0] ?? "Decisão formal pendente."}</p><small>Responsável: {item.owner}{item.evidence.length ? ` | ${item.evidence.length} evidência(s)` : ""}</small></div><Status value={item.status} /></article>) : <><article><span>DEC 01</span><div><strong>Mapeamento de zonas em REDUZIR FORTE</strong><p>Seção 18 é a convenção primária. Workbook 32.6 permanece disponível como variante versionada.</p></div><Status value="REVIEW" /></article><article><span>DEC 02</span><div><strong>Seed RKF V5.1</strong><p>{data.seed.imported ? "Pacote canônico importado com hash, contagens e proveniência preservados." : "Staging conferido. A importação transacional está pronta para execução controlada."}</p></div><Status value={data.seed.imported ? "PASS" : "REVIEW"} /></article></>}</section>
   </div>;
 }

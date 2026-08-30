@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { ManagedStore } from "./managed-store.js";
 import { registerOperationalRoutes } from "./operational-routes.js";
 import { login } from "./auth.js";
+import JSZip from "jszip";
 
 const root = mkdtempSync(join(tmpdir(), "rkf-operational-"));
 const store = new ManagedStore(join(root, "store.json"));
@@ -49,5 +50,18 @@ describe("uploads e importações operacionais", () => {
 
   it("bloqueia listagem sem sessão", async () => {
     expect((await app.inject({ method: "GET", url: "/api/v1/manage/videos" })).statusCode).toBe(401);
+  });
+
+  it("aceita ZIP documental seguro e persiste o relatório de extração", async () => {
+    const zip = new JSZip();
+    zip.file("biblioteca/sessao.txt", "8x100 livre A2");
+    const payload = await zip.generateAsync({ type: "nodebuffer" });
+    const response = await app.inject({ method: "POST", url: "/api/v1/uploads?kind=documents", ...form("biblioteca-rkf.zip", "application/zip", payload) });
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      extractionStatus: "extracted",
+      extraction: { format: "zip", archive: { totalEntries: 1, extractedEntries: 1 } },
+    });
+    await app.inject({ method: "DELETE", url: `/api/v1/manage/documents/${response.json().id}`, headers: { cookie } });
   });
 });

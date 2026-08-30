@@ -93,8 +93,19 @@ describe("rotas RKF", () => {
     expect(response.json()).toMatchObject({
       program: { version: "RKF_V5.1", mode: "VALIDATION" },
       seed: { expectedSessions: 910, expectedBlocks: 6226, packageLocated: true, staged: true, imported: false, status: "STAGING_READY" },
+      release: { decision: "BLOCKED", summary: { total: 36 } },
       provenance: { type: "SYNTHETIC_VALIDATION" },
     });
+    expect(response.json().gates).toHaveLength(36);
+  });
+
+  it("restringe e executa o registro completo de release gates", async () => {
+    const unauthenticated = await app.inject({ method: "GET", url: "/api/v1/rkf/release-gates" });
+    expect(unauthenticated.statusCode).toBe(401);
+    const response = await app.inject({ method: "GET", url: "/api/v1/rkf/release-gates", headers: { cookie: coachCookie } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ methodologyVersion: "RKF_V5.1", decision: "BLOCKED", summary: { total: 36 }, scope: { realDeviceIntegrations: "EXCLUDED_BY_PRODUCT_SCOPE" } });
+    expect(response.json().gates.find((gate: { id: string }) => gate.id === "G07")).toMatchObject({ status: "EXCLUDED" });
   });
 
   it("confere o pacote canônico RKF V5.1 no staging", async () => {

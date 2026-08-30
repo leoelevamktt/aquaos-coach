@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import { extractDocument, signatureMatches } from "./document-extraction.js";
 
 describe("extração documental", () => {
@@ -23,5 +24,38 @@ describe("extração documental", () => {
 
   it("não promete OCR quando o pacote de idioma não está homologado", async () => {
     expect(await extractDocument(Buffer.from([0xff, 0xd8, 0xff]), "foto.jpg")).toMatchObject({ status: "needs_ocr", format: "jpg" });
+  });
+
+  it("inspeciona ZIP, extrai formatos suportados e relata os demais", async () => {
+    const zip = new JSZip();
+    zip.file("rkf/sessoes.csv", "nome,zona\nLimiar,A3");
+    zip.file("rkf/metodo.txt", "4x200 livre A2");
+    zip.file("rkf/binario.exe", Buffer.from([1, 2, 3]));
+    const buffer = await zip.generateAsync({ type: "nodebuffer" });
+    const extracted = await extractDocument(buffer, "rkf.zip");
+    expect(extracted).toMatchObject({
+      status: "extracted",
+      format: "zip",
+      archive: { totalEntries: 3, extractedEntries: 2, skippedEntries: 1 },
+    });
+    expect(extracted.text).toContain("4x200 livre A2");
+    expect(extracted.archive?.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: "rkf/binario.exe", status: "skipped" }),
+    ]));
+  });
+
+  it("bloqueia path traversal e expansão suspeita em ZIP", async () => {
+    const traversal = new JSZip();
+    traversal.file("../fora.txt", "não deve sair do arquivo");
+    const traversalBuffer = await traversal.generateAsync({ type: "nodebuffer" });
+    // JSZip mantém o nome original inseguro para que a nossa inspeção possa rejeitá-lo.
+    expect(await extractDocument(traversalBuffer, "travessia.zip")).toMatchObject({ status: "failed", format: "zip" });
+
+    const bomb = new JSZip();
+    bomb.file("repetido.txt", "A".repeat(2 * 1024 * 1024));
+    const bombBuffer = await bomb.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
+    const result = await extractDocument(bombBuffer, "suspeito.zip");
+    expect(result).toMatchObject({ status: "failed", format: "zip" });
+    expect(result.error).toContain("razão de compressão");
   });
 });

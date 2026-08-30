@@ -10,6 +10,8 @@ import { ManagedStore } from "./managed-store.js";
 import { registerOperationalRoutes, uploadRoot } from "./operational-routes.js";
 import { registerAiRoutes } from "./ai-routes.js";
 import { registerRkfRoutes } from "./rkf-routes.js";
+import { registerRkfSeedCatalogRoutes } from "./rkf-seed-catalog.js";
+import { registerRkfDecisionRoutes } from "./rkf-decisions.js";
 import { registerReportRoutes } from "./report-routes.js";
 import { basename } from "node:path";
 
@@ -42,6 +44,8 @@ await app.register(fastifyStatic, { root: uploadRoot, prefix: "/uploads/", decor
 registerOperationalRoutes(app, managedStore);
 registerAiRoutes(app, managedStore);
 registerRkfRoutes(app, managedStore);
+registerRkfSeedCatalogRoutes(app);
+registerRkfDecisionRoutes(app, managedStore);
 registerReportRoutes(app, managedStore);
 app.addHook("onClose", async () => { await managedStore.close(); });
 

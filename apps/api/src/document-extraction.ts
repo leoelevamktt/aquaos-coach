@@ -2,7 +2,31 @@ import { extname } from "node:path";
 import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import { parseDelimited } from "./managed-store.js";
+
+export const DOCUMENT_UPLOAD_EXTENSIONS = [
+  ".pdf", ".csv", ".json", ".txt", ".jpg", ".jpeg", ".png", ".heic",
+  ".doc", ".docx", ".xls", ".xlsx", ".zip",
+] as const;
+
+const ARCHIVE_EXTRACTABLE_EXTENSIONS = new Set(
+  DOCUMENT_UPLOAD_EXTENSIONS.filter((extension) => ![".zip"].includes(extension)),
+);
+const MAX_ARCHIVE_ENTRIES = 250;
+const MAX_ARCHIVE_ENTRY_BYTES = 10 * 1024 * 1024;
+const MAX_ARCHIVE_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
+const MAX_COMPRESSION_RATIO = 100;
+
+export type ArchiveEntryExtraction = {
+  path: string;
+  sizeBytes: number;
+  status: DocumentExtraction["status"] | "skipped";
+  format: string;
+  textLength?: number;
+  warnings: string[];
+  error?: string;
+};
 
 export type DocumentExtraction = {
   status: "extracted" | "empty" | "needs_ocr" | "unsupported" | "failed";
@@ -12,15 +36,88 @@ export type DocumentExtraction = {
   pageCount?: number;
   sheets?: Array<{ name: string; rows: number; preview: unknown[][] }>;
   rows?: Record<string, unknown>[];
+  archive?: {
+    totalEntries: number;
+    extractedEntries: number;
+    skippedEntries: number;
+    totalUncompressedBytes: number;
+    entries: ArchiveEntryExtraction[];
+  };
   warnings: string[];
   error?: string;
 };
 
 const trimText = (value: string) => value.replace(/\u0000/g, "").replace(/[ \t]+\n/g, "\n").trim().slice(0, 200_000);
 
+type ZipEntryMetadata = {
+  compressedSize?: number;
+  uncompressedSize?: number;
+};
+
+function unsafeArchivePath(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.includes("\u0000") || normalized.startsWith("/") || /^[a-zA-Z]:\//.test(normalized)
+    || normalized.split("/").some((segment) => segment === "..");
+}
+
+async function extractArchive(buffer: Buffer): Promise<DocumentExtraction> {
+  const zip = await JSZip.loadAsync(buffer, { checkCRC32: true, createFolders: false });
+  const files = Object.values(zip.files).filter((entry) => !entry.dir);
+  if (files.length > MAX_ARCHIVE_ENTRIES) throw new Error(`ZIP excede o limite de ${MAX_ARCHIVE_ENTRIES} arquivos.`);
+
+  let declaredTotal = 0;
+  const inspected = files.map((entry) => {
+    const unsafeOriginalName = (entry as typeof entry & { unsafeOriginalName?: string }).unsafeOriginalName ?? entry.name;
+    if (unsafeArchivePath(unsafeOriginalName)) throw new Error("ZIP contém caminho inseguro (path traversal)." );
+    const metadata = (entry as typeof entry & { _data?: ZipEntryMetadata })._data;
+    const uncompressedSize = Number(metadata?.uncompressedSize ?? 0);
+    const compressedSize = Number(metadata?.compressedSize ?? 0);
+    if (!Number.isSafeInteger(uncompressedSize) || uncompressedSize < 0) throw new Error("ZIP contém tamanho de arquivo inválido.");
+    if (uncompressedSize > MAX_ARCHIVE_ENTRY_BYTES) throw new Error(`Arquivo ${entry.name} excede 10 MB após descompactação.`);
+    if (uncompressedSize > 1024 * 1024 && compressedSize > 0 && uncompressedSize / compressedSize > MAX_COMPRESSION_RATIO) {
+      throw new Error(`Arquivo ${entry.name} excede a razão de compressão segura.`);
+    }
+    declaredTotal += uncompressedSize;
+    if (declaredTotal > MAX_ARCHIVE_UNCOMPRESSED_BYTES) throw new Error("ZIP excede 50 MB após descompactação.");
+    return { entry, uncompressedSize };
+  });
+
+  const entries: ArchiveEntryExtraction[] = [];
+  const textParts: string[] = [];
+  for (const { entry, uncompressedSize } of inspected) {
+    const extension = extname(entry.name).toLowerCase();
+    if (extension === ".zip") {
+      entries.push({ path: entry.name, sizeBytes: uncompressedSize, status: "skipped", format: "zip", warnings: ["ZIP aninhado não é processado por segurança."] });
+      continue;
+    }
+    if (!ARCHIVE_EXTRACTABLE_EXTENSIONS.has(extension as (typeof DOCUMENT_UPLOAD_EXTENSIONS)[number])) {
+      entries.push({ path: entry.name, sizeBytes: uncompressedSize, status: "skipped", format: extension.slice(1) || "unknown", warnings: ["Formato não suportado dentro do ZIP; original preservado no arquivo principal."] });
+      continue;
+    }
+    const content = await entry.async("nodebuffer");
+    if (content.length > MAX_ARCHIVE_ENTRY_BYTES) throw new Error(`Arquivo ${entry.name} excede 10 MB após descompactação.`);
+    if (!signatureMatches(content, extension)) throw new Error(`O conteúdo de ${entry.name} não corresponde à extensão informada.`);
+    const extraction = await extractDocument(content, entry.name);
+    entries.push({ path: entry.name, sizeBytes: content.length, status: extraction.status, format: extraction.format, textLength: extraction.textLength, warnings: extraction.warnings, error: extraction.error });
+    if (extraction.text) textParts.push(`### ${entry.name}\n${extraction.text}`);
+  }
+  const text = trimText(textParts.join("\n\n"));
+  const extractedEntries = entries.filter((entry) => entry.status === "extracted").length;
+  const skippedEntries = entries.filter((entry) => entry.status === "skipped" || entry.status === "unsupported").length;
+  return {
+    status: extractedEntries > 0 ? "extracted" : entries.some((entry) => entry.status === "needs_ocr") ? "needs_ocr" : "empty",
+    format: "zip",
+    text: text || undefined,
+    textLength: text.length,
+    archive: { totalEntries: files.length, extractedEntries, skippedEntries, totalUncompressedBytes: declaredTotal, entries },
+    warnings: skippedEntries ? [`${skippedEntries} arquivo(s) do ZIP não foram extraídos; consulte o relatório por item.`] : [],
+  };
+}
+
 export async function extractDocument(buffer: Buffer, filename: string): Promise<DocumentExtraction> {
   const extension = extname(filename).toLowerCase();
   try {
+    if (extension === ".zip") return await extractArchive(buffer);
     if ([".txt", ".csv", ".json"].includes(extension)) {
       const text = trimText(buffer.toString("utf8"));
       if (!text) return { status: "empty", format: extension.slice(1), warnings: ["Arquivo sem conteúdo textual."] };
@@ -71,7 +168,8 @@ export async function extractDocument(buffer: Buffer, filename: string): Promise
 export function signatureMatches(buffer: Buffer, extension: string) {
   const ext = extension.toLowerCase();
   if (ext === ".pdf") return buffer.subarray(0, 5).toString() === "%PDF-";
-  if ([".docx", ".xlsx"].includes(ext)) return buffer[0] === 0x50 && buffer[1] === 0x4b;
+  if ([".docx", ".xlsx", ".zip"].includes(ext)) return buffer[0] === 0x50 && buffer[1] === 0x4b
+    && [[0x03, 0x04], [0x05, 0x06], [0x07, 0x08]].some(([third, fourth]) => buffer[2] === third && buffer[3] === fourth);
   if (ext === ".png") return buffer.subarray(1, 4).toString() === "PNG";
   if ([".jpg", ".jpeg"].includes(ext)) return buffer[0] === 0xff && buffer[1] === 0xd8;
   if ([".mp4", ".m4v", ".mov"].includes(ext)) return buffer.subarray(4, 12).includes(Buffer.from("ftyp"));

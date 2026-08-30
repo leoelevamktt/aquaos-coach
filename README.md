@@ -45,6 +45,8 @@ O frontend usa o backend em `http://localhost:4000`. Para apontar para outro amb
 - Ingestão multicanal real: `POST /api/v1/rkf/ingestions` aceita JSON (canal TEXT com parser RKF automático — zonas, volumes, materiais, RP→marcador RDC) e multipart (canais PHOTO/FILE/VOICE com extração documental via PDF/DOCX/XLSX/CSV/TXT e pipeline RECEIVED→STORED→EXTRACTED→PARSED→REVIEW). Confiança <0,85 exige revisão humana; nada é inventado.
 - PDF da prescrição publicada (`GET /api/v1/rkf/prescriptions/:id.pdf`) com blocos, zonas, volumes, versões do motor e hash SHA-256 — somente após aprovação do coach.
 - Tenant isolation sem allowlists literais: acesso de atleta validado exclusivamente pelo `athleteId` da sessão autenticada.
+- Catálogo auditável da seed: os dez arquivos e 15.246 linhas podem ser consultados com paginação, busca, hash SHA-256, colunas, finalidade e estado de ativação; dados preservados ainda não operacionalizados permanecem explicitamente em revisão.
+- Registro formal das 12 decisões metodológicas pendentes, com evidências, responsável, revisão otimista e bloqueio de release quando uma decisão crítica não está homologada.
 
 ## Gestão de arquivos e análise
 
