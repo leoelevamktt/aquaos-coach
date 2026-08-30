@@ -7,17 +7,17 @@ const archivo = Archivo({ subsets: ["latin"], variable: "--font-display", displa
 const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-mono", display: "swap" });
 
 export const metadata: Metadata = {
-  title: { default: "AquaOS Coach", template: "%s · AquaOS" },
-  description: "Sistema operacional de performance para equipes de natação.",
-  applicationName: "AquaOS Coach",
+  title: { default: "RKF Coach", template: "%s · RKF Coach" },
+  description: "Prescrição, controle de carga e inteligência para natação de alto rendimento.",
+  applicationName: "RKF Coach",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "AquaOS" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "RKF Coach" },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#06171e",
+  themeColor: "#0b1e3f",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

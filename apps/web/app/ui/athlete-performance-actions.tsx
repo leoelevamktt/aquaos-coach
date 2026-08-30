@@ -155,7 +155,7 @@ export function exportAthletePerformance(athlete: AthleteProfile, goal: AthleteG
     "Zona;Descricao;Percentual;Distancia (m)",
     ...intensity.map((row) => `${row.code};${row.label};${row.percent};${row.meters}`),
     "",
-    "Observacao;Indicadores calculados com o DemoLoadEngine e dados sinteticos",
+    "Observacao;Indicadores calculados com o RkfLoadEngine V5.1 e dados sinteticos de validacao",
   ];
   downloadCsv(`volume-intensidade-${athlete.id}.csv`, lines);
 }
@@ -233,7 +233,7 @@ export function MethodologyDialog({ athlete, onClose }: { athlete: AthleteProfil
   };
   return <ModalShell title="Metodologia das cinco habilidades" subtitle="Contrato demonstrativo, versionado e explicável" onClose={onClose} wide>
     <div className="methodology-panel">
-      <section className="methodology-callout"><Sparkles size={22} /><div><span>MOTOR ATIVO</span><b>DemoLoadEngine v1.4</b><p>Os pesos abaixo são demonstrativos e não representam o método proprietário da seleção.</p></div><strong>84% confiança</strong></section>
+      <section className="methodology-callout"><Sparkles size={22} /><div><span>MOTOR ATIVO</span><b>RkfLoadEngine V5.1</b><p>Método versionado em validação. Pesos, regras e evidências permanecem auditáveis antes da homologação oficial.</p></div><strong>85% confiança</strong></section>
       <section className="methodology-flow">
         {[{ icon: Film, title: "Evidência", body: "Vídeo, prova, treino e registro manual." }, { icon: ShieldCheck, title: "Validação", body: "Recência, qualidade e origem verificável." }, { icon: Gauge, title: "Pontuação", body: "Escala de 0 a 100 por habilidade." }, { icon: LineChart, title: "Tendência", body: "Comparação com a linha de base individual." }].map(({ icon: Icon, title, body }) => <article key={title}><Icon size={18} /><b>{title}</b><p>{body}</p></article>)}
       </section>
@@ -327,7 +327,7 @@ export function AthleteMessageDialog({ athlete, onClose, onNotify }: { athlete: 
       await apiRequest("/api/v1/manage/activities", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "message", athleteId: athlete.id, athlete: athlete.name, body, channel: "AquaOS", status: "sent", sentAt: new Date().toISOString() }),
+        body: JSON.stringify({ type: "message", athleteId: athlete.id, athlete: athlete.name, body, channel: "RKF Coach", status: "sent", sentAt: new Date().toISOString() }),
       });
       setSent((current) => [...current, body]);
       setMessage("");

@@ -1,0 +1,19 @@
+﻿rule_id,rule_group,rule_text,severity
+R001,EXACT_VOLUME,Volume proposto e auditado devem fechar com diferença 0 antes da liberação.,HARD
+R002,ZONE_VOCAB,"Usar VALAT, A1, A2, A3, AN1 e AN2.",HARD
+R003,ZONE_MAPPING,EN1=A1; EN2=A2; EN3=A3; SP1=AN1; SP2=AN2; SP3=VALAT.,HARD
+R004,VALAT_QUALITY,VALAT prioriza qualidade neuromuscular curta com recuperação suficiente.,HARD
+R005,A2_STABILITY,"A2 exige estabilidade de ritmo, mecânica, braçadas e PSE.",HARD
+R006,PROGRESSION_VOLUME,Menor intensidade admite maior volume; maior intensidade exige menor volume e mais qualidade.,HARD
+R007,AGE_PERIODIZATION,8–13 predominantemente linear/desenvolvimental; 14+ pode usar ATR conforme contexto.,GUIDE
+R008,TECH_TRANSFER,Educativos devem transferir para nado completo.,HARD
+R009,MATERIAL_TRANSFER,"Resistido com material deve, quando aplicável, transferir para nado limpo.",GUIDE
+R010,FULL_DESCRIPTION,Nenhum bloco fica implícito; ausência deve ser 0 m com justificativa.,HARD
+R011,NO_LONG_APNEA,Não prescrever apneia prolongada; priorizar segurança e qualidade.,HARD
+R012,EYES_CLOSED_SAFE,"Olhos fechados somente por poucos ciclos, supervisionado e longe da parede.",HARD
+R013,MASTER_COST,Master mantém qualidade com custo adaptativo e mecânico inteligente.,GUIDE
+R014,POST_SESSION_DATA,"Tempos, PSE e observações pós-treino devem vincular-se ao session_id.",GUIDE
+R015,AI_BOUNDARY,IA adapta dentro da intenção; trocar objetivo/zona/fundamento exige nova decisão do Planning Engine.,HARD
+R016,SOURCE_OF_TRUTH,"MASTER é fonte editorial; app consulta banco estruturado, não o XLSX inteiro em tempo real.",ARCH
+R017,DECISION_SEPARATION,Biblioteca define opções; Planning Engine decide; IA apresenta/adapta dentro das regras.,ARCH
+R018,BLOCK_RECOMBINATION,Recombinar blocos somente quando machine_status=READY_WHOLE|BLOCKS_EXACT; senão usar sessão inteira.,HARD

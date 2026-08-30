@@ -1,0 +1,40 @@
+# Caddy — HTTPS automático (Let's Encrypt) e proxy reverso.
+# Substitua SEU_DOMINIO pelo domínio real (ex.: app.rkfcoach.com) apontando
+# para o IP público da EC2 com um registro A.
+#
+# Sem domínio? Comente o bloco abaixo e descomente o bloco ":80" no final
+# (HTTP puro, sem cookie Secure — o app funciona, mas sem HTTPS).
+
+SEU_DOMINIO {
+	encode gzip
+
+	# PDFs e relatórios podem ser grandes
+	request_body {
+		max_size 30MB
+	}
+
+	# API Fastify
+	handle_path /api/* {
+		reverse_proxy api:4000
+	}
+
+	# Arquivos enviados (streaming de vídeo suportado pelo Fastify static)
+	handle_path /uploads/* {
+		reverse_proxy api:4000
+	}
+
+	# Frontend Next.js (tudo o mais)
+	reverse_proxy web:3000
+}
+
+# Alternativa sem domínio (HTTP puro no IP público) — descomente para usar:
+# :80 {
+# 	encode gzip
+# 	handle_path /api/* {
+# 		reverse_proxy api:4000
+# 	}
+# 	handle_path /uploads/* {
+# 		reverse_proxy api:4000
+# 	}
+# 	reverse_proxy web:3000
+# }

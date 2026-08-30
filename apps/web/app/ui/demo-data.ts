@@ -93,18 +93,18 @@ export const athletes: AthleteProfile[] = [
 ];
 
 export const practices = [
-  { id: "p1", date: "2026-08-28", day: "SEX", title: "Ritmo de prova · 200 Livre", distance: 5200, zone: "RP", type: "swim", time: "07:30", status: "published", group: "Equipe inteira", rpe: 7 },
+  { id: "p1", date: "2026-08-28", day: "SEX", title: "Ritmo de prova · 200 Livre", distance: 5200, zone: "AN2", type: "swim", time: "07:30", status: "published", group: "Equipe inteira", rpe: 7 },
   { id: "p2", date: "2026-08-28", day: "SEX", title: "Força máxima · membros inferiores", distance: 0, zone: "FORÇA", type: "strength", time: "16:00", status: "published", group: "Elite", rpe: 8 },
   { id: "p3", date: "2026-08-29", day: "SÁB", title: "Aeróbio regenerativo + técnica", distance: 3800, zone: "A1", type: "swim", time: "08:00", status: "draft", group: "Equipe inteira", rpe: 4 },
-  { id: "p4", date: "2026-08-31", day: "SEG", title: "VO₂ · tolerância ao lactato", distance: 4600, zone: "AN", type: "swim", time: "06:30", status: "published", group: "Elite", rpe: 9 },
+  { id: "p4", date: "2026-08-31", day: "SEG", title: "VO₂ · tolerância ao lactato", distance: 4600, zone: "AN1", type: "swim", time: "06:30", status: "published", group: "Elite", rpe: 9 },
   { id: "p5", date: "2026-09-01", day: "TER", title: "Base aeróbia · eficiência", distance: 5800, zone: "A2", type: "swim", time: "07:00", status: "published", group: "Equipe inteira", rpe: 6 },
   { id: "p6", date: "2026-09-02", day: "QUA", title: "Potência e core", distance: 0, zone: "FORÇA", type: "strength", time: "16:30", status: "draft", group: "Desenvolvimento", rpe: 7 },
 ];
 
 export const workoutLibrary = [
-  { id: "lib1", title: "Ritmo de 200 · fechamento forte", distance: 5200, zone: "RP", duration: "1h42", favorite: true, blocks: ["800 aquecimento misto", "12×50 técnica @1:00", "3× [4×100 RP @1:35 + 200 A1]", "600 soltura"] },
+  { id: "lib1", title: "Ritmo de 200 · fechamento forte", distance: 5200, zone: "AN2", duration: "1h42", favorite: true, blocks: ["800 aquecimento misto", "12×50 técnica @1:00", "3× [4×100 AN2 @1:35 + 200 A1]", "600 soltura"] },
   { id: "lib2", title: "Aeróbio específico · eficiência", distance: 6100, zone: "A2", duration: "1h48", favorite: false, blocks: ["1000 aquecimento", "8×100 crawl @1:35", "4×800 A2 negativo", "700 recuperação"] },
-  { id: "lib3", title: "Lactato · velocidade sustentada", distance: 4200, zone: "AN", duration: "1h30", favorite: true, blocks: ["900 aquecimento", "8×25 submerso", "3× [4×50 máximo + 300 leve]", "700 soltura"] },
+  { id: "lib3", title: "Lactato · velocidade sustentada", distance: 4200, zone: "AN1", duration: "1h30", favorite: true, blocks: ["900 aquecimento", "8×25 submerso", "3× [4×50 máximo + 300 leve]", "700 soltura"] },
   { id: "lib4", title: "Regenerativo técnico", distance: 3200, zone: "A1", duration: "1h05", favorite: false, blocks: ["600 livre", "16×50 educativos", "8×100 nado completo", "600 soltura"] },
 ];
 
@@ -157,9 +157,10 @@ export const connectors = [
 ];
 
 export const zoneDistribution = [
-  { code: "A1", label: "Regenerativo", color: "#55b6c8", percent: 28, pace: "1:38-1:48" },
-  { code: "A2", label: "Aeróbio", color: "#2f8bc7", percent: 34, pace: "1:26-1:37" },
-  { code: "A3", label: "Limiar", color: "#7060d8", percent: 19, pace: "1:18-1:25" },
-  { code: "AN", label: "Anaeróbio", color: "#e97861", percent: 11, pace: "1:10-1:17" },
-  { code: "RP", label: "Ritmo de prova", color: "#efb34b", percent: 8, pace: "por prova" },
+  { code: "VALAT", label: "Velocidade alática", color: "#8f3db5", percent: 5, pace: "individual" },
+  { code: "A1", label: "Regenerativo", color: "#2da7c7", percent: 25, pace: "1:38-1:48" },
+  { code: "A2", label: "Aeróbio", color: "#174a8c", percent: 32, pace: "1:26-1:37" },
+  { code: "A3", label: "Limiar", color: "#5572c8", percent: 18, pace: "1:18-1:25" },
+  { code: "AN1", label: "Tolerância anaeróbia", color: "#df6b45", percent: 12, pace: "individual" },
+  { code: "AN2", label: "Potência anaeróbia", color: "#c13d4d", percent: 8, pace: "individual" },
 ];

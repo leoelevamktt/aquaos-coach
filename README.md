@@ -39,6 +39,12 @@ O frontend usa o backend em `http://localhost:4000`. Para apontar para outro amb
 - Simuladores Garmin, Polar e Apple com importação e envio conforme a matriz de capacidades.
 - Idempotência por `externalId` e armazenamento do payload bruto no modelo.
 - PostgreSQL com schema inicial e armazenamento persistente de mídia/metadados no volume `natacao_api_storage`.
+- Biblioteca RKF V5.1 integrada ao motor de planejamento: as 910 sessões / 6.226 blocos da seed são carregadas em `GET /api/v1/rkf/sessions` (filtros por zona, faixa de idade, perfil, tipo e volume) e alimentam o pipeline eligible → scored → candidate → audited em `POST /api/v1/rkf/sessions/compose`, com fallback de recomposição determinística quando o candidato da biblioteca reprova na auditoria.
+- Pipeline de evolução ponta a ponta: `POST /api/v1/rkf/evolution/assess-set` calcula score composto (0,45 tempo + 0,20 consistência + 0,15 fadiga + 0,20 eficiência) e delta percentual a partir do histórico por chave comparável de 8 partes, e `GET /api/v1/rkf/evolution/athletes/:id` consolida as avaliações do atleta. Menos de 3 comparáveis retorna `DADOS_INSUFICIENTES`.
+- Decisões de adaptação persistidas com versão, guardrails e trilha de auditoria em `POST /api/v1/rkf/readiness/adapt`.
+- Ingestão multicanal real: `POST /api/v1/rkf/ingestions` aceita JSON (canal TEXT com parser RKF automático — zonas, volumes, materiais, RP→marcador RDC) e multipart (canais PHOTO/FILE/VOICE com extração documental via PDF/DOCX/XLSX/CSV/TXT e pipeline RECEIVED→STORED→EXTRACTED→PARSED→REVIEW). Confiança <0,85 exige revisão humana; nada é inventado.
+- PDF da prescrição publicada (`GET /api/v1/rkf/prescriptions/:id.pdf`) com blocos, zonas, volumes, versões do motor e hash SHA-256 — somente após aprovação do coach.
+- Tenant isolation sem allowlists literais: acesso de atleta validado exclusivamente pelo `athleteId` da sessão autenticada.
 
 ## Gestão de arquivos e análise
 

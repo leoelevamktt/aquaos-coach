@@ -1,0 +1,16 @@
+﻿exercise_code,exercise_name,category,stroke_scope,skill,definition
+EX_SCULL,Scull,Sensibilidade,Geral,Scull,Percepção de pressão da mão/antebraço.
+EX_FIST,Punho fechado,Sensibilidade,Livre,Braçada,Contraste sensorial.
+EX_CATCHUP,Catch-up,Técnica,Livre,Coordenação,Entrada/alinhamento.
+EX_UNILATERAL,Unilateral,Técnica,Geral,Coordenação,Isolamento de um membro.
+EX_FINGERTIP,Fingertip,Técnica,Livre,Recuperação,Cotovelo/recuperação.
+EX_6K3S,6 pernadas + 3 braçadas,Coordenação,Livre,Rotação,Eixo e transferência.
+EX_STREAMLINE,Streamline,Habilidade,Todos,Streamline,Alinhamento.
+EX_BREAKOUT,Breakout,Habilidade,Todos,Breakout,Transição para superfície.
+EX_DOLPHIN_UW,Ondulação submersa,Submerso,Livre/costas/borboleta,Submerso,Ondulação em streamline.
+EX_BREAST_PULL,Pullout peito,Submerso,Peito,Submerso,Sequência submersa de peito.
+EX_START_FRONT,Saída frontal,Fundamento,Livre/peito/borboleta,Saída,Saída frontal completa.
+EX_START_BACK,Saída costas,Fundamento,Costas,Saída,Saída dorsal completa.
+EX_TURN_FREE,Virada crawl,Fundamento,Livre,Virada,Cambalhota + saída.
+EX_TURN_OPEN,Virada aberta,Fundamento,Peito/borboleta,Virada,Toque simultâneo + rotação.
+EX_TURN_BACK,Virada costas,Fundamento,Costas,Virada,Rotação + cambalhota + saída.

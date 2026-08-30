@@ -88,7 +88,7 @@ export function AiAssistant() {
           <div className="ai-panel-title">
             <span className="ai-panel-badge"><Bot size={17} /></span>
             <div>
-              <strong>Assistente AquaOS</strong>
+              <strong>Assistente RKF Coach</strong>
               <small>{available === false ? "offline" : "conectado aos dados da plataforma"}</small>
             </div>
           </div>
@@ -100,7 +100,7 @@ export function AiAssistant() {
             <div className="ai-welcome">
               <span className="ai-welcome-icon"><MessageCircle size={22} /></span>
               <strong>Pergunte qualquer coisa da plataforma</strong>
-              <p>Atletas, treinos, metas, competições, vídeos, prontidão, volumes e auditoria — eu leio tudo em tempo real.</p>
+              <p>Atletas, treinos, metas, competições, vídeos, prontidão, volumes e auditoria. Eu leio tudo em tempo real.</p>
               <div className="ai-suggestions">
                 {SUGGESTIONS.map((suggestion) => (
                   <button key={suggestion} onClick={() => void send(suggestion)}>{suggestion}</button>
@@ -129,7 +129,7 @@ export function AiAssistant() {
           <input
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder={available === false ? "Assistente indisponível — configure LLM_API_KEY" : "Pergunte sobre atletas, treinos, metas…"}
+            placeholder={available === false ? "Assistente indisponível. Configure LLM_API_KEY" : "Pergunte sobre atletas, treinos, metas…"}
             aria-label="Mensagem para o assistente"
             disabled={available === false}
           />

@@ -23,5 +23,9 @@ describe("ManagedStore", () => {
   it("interpreta CSV com vírgula ou ponto e vírgula", () => {
     expect(parseDelimited("name,email\nAna,ana@example.com")).toEqual([{ name: "Ana", email: "ana@example.com" }]);
     expect(parseDelimited("name;group\nCaio;Elite")).toEqual([{ name: "Caio", group: "Elite" }]);
+    expect(parseDelimited('name,notes\nAna,"ritmo, técnica e virada"\nCaio,"linha 1\nlinha 2"')).toEqual([
+      { name: "Ana", notes: "ritmo, técnica e virada" },
+      { name: "Caio", notes: "linha 1\nlinha 2" },
+    ]);
   });
 });

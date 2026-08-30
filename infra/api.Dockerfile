@@ -7,5 +7,6 @@ RUN npm install
 COPY tsconfig.base.json ./
 COPY packages/domain packages/domain
 COPY apps/api apps/api
+COPY data/rkf data/rkf
 RUN npm run build -w @natacao/domain && npm run build -w @natacao/api
 CMD ["npm", "run", "start", "-w", "@natacao/api"]

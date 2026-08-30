@@ -6,6 +6,7 @@ import { ModalShell } from "./components";
 import { apiRequest } from "./api";
 
 export type WorkoutSeed = {
+  id?: string;
   title: string;
   prompt: string;
   distanceMeters: number;
@@ -13,11 +14,12 @@ export type WorkoutSeed = {
   kind: "swim" | "strength";
 };
 
-export function WorkoutTemplateEditor({ initial, onClose, onUse, onNotify }: {
+export function WorkoutTemplateEditor({ initial, onClose, onUse, onNotify, onSaved }: {
   initial?: WorkoutSeed;
   onClose: () => void;
   onUse: (seed: WorkoutSeed) => void;
   onNotify: (message: string) => void;
+  onSaved?: () => void;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [kind, setKind] = useState<"swim" | "strength">(initial?.kind ?? "swim");
@@ -42,10 +44,8 @@ export function WorkoutTemplateEditor({ initial, onClose, onUse, onNotify }: {
     setSaving(true); setError("");
     const draft = seed();
     try {
-      await apiRequest("/api/v1/manage/workouts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const payload = {
+          id: initial?.id,
           title: draft.title,
           kind: draft.kind,
           distanceMeters: draft.distanceMeters,
@@ -54,8 +54,18 @@ export function WorkoutTemplateEditor({ initial, onClose, onUse, onNotify }: {
           blocks: draft.prompt.split("\n").map((line) => line.trim()).filter(Boolean),
           source: "library",
           status: "template",
-        }),
-      });
+        };
+      if (initial?.id) {
+        const listing = await apiRequest<{ data: Array<{ id: string }> }>("/api/v1/manage/workouts");
+        if (listing.data.some((item) => item.id === initial.id)) {
+          await apiRequest(`/api/v1/manage/workouts/${initial.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        } else {
+          await apiRequest("/api/v1/manage/workouts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        }
+      } else {
+        await apiRequest("/api/v1/manage/workouts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      }
+      onSaved?.();
       onNotify("Modelo salvo na biblioteca com trilha de auditoria.");
       onClose();
     } catch (cause) {
@@ -73,7 +83,7 @@ export function WorkoutTemplateEditor({ initial, onClose, onUse, onNotify }: {
         <label className="wide"><span>Título do modelo</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ex.: Ritmo de 200 com fechamento forte" /></label>
         <label><span>Tipo</span><select value={kind} onChange={(event) => setKind(event.target.value as "swim" | "strength")}><option value="swim">Natação</option><option value="strength">Força</option></select></label>
         <label><span>{kind === "swim" ? "Metragem total" : "Duração estimada"}</span><input inputMode="numeric" value={distance} onChange={(event) => setDistance(event.target.value)} /></label>
-        {kind === "swim" && <label><span>Zona principal</span><select value={zone} onChange={(event) => setZone(event.target.value)}><option>A1</option><option>A2</option><option>A3</option><option>AN</option><option>RP</option></select></label>}
+        {kind === "swim" && <label><span>Zona principal</span><select value={zone} onChange={(event) => setZone(event.target.value)}><option>VALAT</option><option>A1</option><option>A2</option><option>A3</option><option>AN1</option><option>AN2</option></select></label>}
         <label className={kind === "swim" ? "" : "wide"}><span>Estado</span><input readOnly value="Modelo da biblioteca" /></label>
         <label className="wide"><span>Estrutura do treino</span><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder={kind === "swim" ? "Um bloco por linha: repetições, distância, nado, intervalo, zona e observações" : "Um exercício por linha: séries, repetições, carga e observações"} /></label>
       </div>

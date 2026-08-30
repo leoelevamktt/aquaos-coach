@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { ManagedStore } from "./managed-store.js";
+import { getSession, roleAllows, sessionToken } from "./auth.js";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -16,8 +17,8 @@ function esc(value: unknown): string {
  * O assistente só conhece o que está aqui — então este snapshot deve cobrir
  * todas as entidades visíveis na interface do coach.
  */
-export function buildPlatformContext(store: ManagedStore): string {
-  const list = (kind: string) => store.list(kind as never);
+export function buildPlatformContext(store: ManagedStore, organizationId = "org-demo"): string {
+  const list = (kind: string) => store.list(kind as never).filter((item) => item.organizationId === organizationId);
   const sections: string[] = [];
 
   const settings = list("settings");
@@ -32,7 +33,7 @@ export function buildPlatformContext(store: ManagedStore): string {
   const athletes = list("athletes") as Array<Record<string, unknown>>;
   if (athletes.length) {
     sections.push(`## Atletas (${athletes.length})
-${athletes.map((a) => `- ${esc(a.name)} (${esc(a.handle)}) · grupo: ${esc(a.group)} · nado: ${esc(a.stroke)} · status: ${esc(a.status)} · e-mail: ${esc(a.email)}`).join("\n")}`);
+${athletes.map((a) => `- ${esc(a.name)} (${esc(a.handle)}) · grupo: ${esc(a.group)} · nado: ${esc(a.stroke)} · status: ${esc(a.status)}`).join("\n")}`);
   }
 
   const groups = list("groups") as Array<Record<string, unknown>>;
@@ -83,7 +84,7 @@ ${zones.map((z) => `- ${esc(z.name)} · código: ${esc(z.code)} · ritmo: ${esc(
 ${goals.map((g) => `- ${esc(g.name)} · prova: ${esc(g.event)} · tempo-alvo: ${esc(g.targetTime)} · status: ${esc(g.status)}`).join("\n")}`);
   }
 
-  const audit = store.audit(12);
+  const audit = store.audit(100).filter((entry) => (entry.organizationId ?? "org-demo") === organizationId).slice(0, 12);
   if (audit.length) {
     sections.push(`## Atividade recente (auditoria)
 ${audit.map((entry) => `- ${esc(entry.createdAt)} · ${esc(entry.action)} em ${esc(entry.resource)}: ${esc(entry.summary)}`).join("\n")}`);
@@ -127,15 +128,15 @@ function buildPerformanceContext(): string {
 - Total da equipe: 148,9 km · meta semanal 155 km · ↑6,8% vs semana passada
 
 ## Calendário de treinos (próximos)
-- 28/08 SEX 07:30 · Ritmo de prova · 200 Livre · 5.200 m · RP · Equipe inteira · RPE 7 · publicado
+- 28/08 SEX 07:30 · Ritmo de prova · 200 Livre · 5.200 m · AN2 · Equipe inteira · RPE 7 · publicado
 - 28/08 SEX 16:00 · Força máxima · membros inferiores · 55 min · Elite · RPE 8 · publicado
 - 29/08 SÁB 08:00 · Aeróbio regenerativo + técnica · 3.800 m · A1 · Equipe inteira · RPE 4 · rascunho
-- 31/08 SEG 06:30 · VO₂ · tolerância ao lactato · 4.600 m · AN · Elite · RPE 9 · publicado
+- 31/08 SEG 06:30 · VO₂ · tolerância ao lactato · 4.600 m · AN1 · Elite · RPE 9 · publicado
 - 01/09 TER 07:00 · Base aeróbia · eficiência · 5.800 m · A2 · Equipe inteira · RPE 6 · publicado
 - 02/09 QUA 16:30 · Potência e core · FORÇA · Desenvolvimento · RPE 7 · rascunho
 
 ## Biblioteca de treinos
-Natação: Ritmo de 200 · fechamento forte (5.200m RP) · Aeróbio específico · eficiência (6.100m A2) · Lactato · velocidade sustentada (4.200m AN) · Regenerativo técnico (3.200m A1)
+Natação: Ritmo de 200 · fechamento forte (5.200m AN2) · Aeróbio específico · eficiência (6.100m A2) · Lactato · velocidade sustentada (4.200m AN1) · Regenerativo técnico (3.200m A1)
 Força: Potência de saída (55min, 6.4t) · Estabilidade de ombro (42min, 2.8t) · Força máxima geral (70min, 10.2t)
 
 ## Temporada e fases
@@ -171,7 +172,7 @@ Garmin Connect (conectado, 3 atletas, leitura+escrita) · Polar Flow (conectado,
 Aguda 538 · Crônica 504 · ACWR 1,07 (razoável) · aderência à carga 93,4% · presença geral 91% (32/35 sessões) · evolução de PBs: +12 nos últimos 90 dias · cobertura de wearable: 5 de 6`;
 }
 
-const SYSTEM_PROMPT = `Você é o assistente de inteligência do AquaOS Coach, a plataforma de gestão de equipes de natação.
+const SYSTEM_PROMPT = `Você é o assistente de inteligência do RKF Coach, a plataforma de gestão de equipes de natação.
 
 CONTEXTO: você recebe abaixo um snapshot completo e atualizado dos dados da plataforma (dados de gestão + dados de performance). Responda APENAS com base nesses dados.
 
@@ -220,13 +221,19 @@ async function callLLm(messages: Array<{ role: string; content: string }>): Prom
 }
 
 export function registerAiRoutes(app: FastifyInstance, store: ManagedStore) {
-  app.get("/api/v1/ai/status", async () => ({
+  app.get("/api/v1/ai/status", async (request, reply) => {
+    const user = getSession(sessionToken(request));
+    if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação exclusiva da comissão técnica" : "Autenticação necessária" });
+    return ({
     available: Boolean(LLM_API_KEY),
     model: LLM_API_KEY ? LLM_MODEL : null,
     gateway: LLM_API_KEY ? LLM_BASE_URL : null,
-  }));
+    });
+  });
 
   app.post("/api/v1/ai/chat", async (request, reply) => {
+    const user = getSession(sessionToken(request));
+    if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação exclusiva da comissão técnica" : "Autenticação necessária" });
     const body = (await request.body) as { messages?: ChatMessage[] } | null;
     const history = Array.isArray(body?.messages) ? body!.messages!.slice(-12) : [];
     if (!history.length || history.some((m) => typeof m.content !== "string" || !m.content.trim())) {
@@ -236,7 +243,7 @@ export function registerAiRoutes(app: FastifyInstance, store: ManagedStore) {
       return reply.code(503).send({ error: "Assistente indisponível: configure LLM_API_KEY no ambiente da API." });
     }
 
-    const context = `${buildPlatformContext(store)}\n\n${buildPerformanceContext()}`;
+    const context = `${buildPlatformContext(store, user!.organizationId)}\n\n${user!.organizationId === "org-demo" ? buildPerformanceContext() : ""}`;
     const messages = [
       { role: "system", content: `${SYSTEM_PROMPT}\n\n=== SNAPSHOT DA PLATAFORMA ===\n${context}` },
       ...history.map((m) => ({ role: m.role, content: m.content })),

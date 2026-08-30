@@ -26,6 +26,8 @@ services:
         fromDatabase:
           name: natacao-db
           property: connectionString
+      - key: PERSISTENCE_REQUIRED
+        value: "true"
       - key: NODE_ENV
         value: production
 

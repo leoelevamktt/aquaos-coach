@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PostgresPersistence, type PersistenceHealth, type RkfSeedImport } from "./postgres-persistence.js";
 
-export const resourceKinds = ["athletes", "groups", "workouts", "seasons", "meets", "videos", "documents", "staff", "zones", "goals", "activities", "settings"] as const;
+export const resourceKinds = ["athletes", "groups", "workouts", "seasons", "meets", "videos", "documents", "staff", "zones", "goals", "activities", "ingestions", "prescriptions", "results", "loadSnapshots", "adaptationDecisions", "governance", "settings"] as const;
 export type ResourceKind = typeof resourceKinds[number];
 
 export type ManagedRecord = {
@@ -15,16 +16,17 @@ export type ManagedRecord = {
   [key: string]: unknown;
 };
 
-type AuditRecord = {
+export type AuditRecord = {
   id: string;
   action: "create" | "update" | "delete" | "import" | "upload" | "analyze";
   resource: ResourceKind;
   resourceId?: string;
   summary: string;
   createdAt: string;
+  organizationId?: string;
 };
 
-type DatabaseShape = { resources: Record<ResourceKind, ManagedRecord[]>; audit: AuditRecord[] };
+export type DatabaseShape = { resources: Record<ResourceKind, ManagedRecord[]>; audit: AuditRecord[] };
 
 const now = () => new Date().toISOString();
 const identifier = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -51,7 +53,7 @@ function seed(): DatabaseShape {
         { id: "pedro-lima", name: "Pedro Lima", handle: "@pedrobreast", group: "Desenvolvimento · Raia 3", stroke: "Peito", status: "active", email: "pedro@aquaos.app" },
       ]),
       groups: records([{ id: "elite", name: "Elite · Raia 4", color: "#0c8f7c", members: 2, status: "active" }, { id: "desenvolvimento", name: "Desenvolvimento · Raia 3", color: "#7357ef", members: 2, status: "active" }]),
-      workouts: records([{ id: "ritmo-200", title: "Ritmo de prova · 200 Livre", status: "published", date: "2026-08-28", distanceMeters: 5200, zone: "RP" }, { id: "forca-maxima", title: "Força máxima · membros inferiores", status: "published", date: "2026-08-28", durationMinutes: 55 }]),
+      workouts: records([{ id: "ritmo-200", title: "Ritmo de prova · 200 Livre", status: "published", date: "2026-08-28", distanceMeters: 5200, zone: "AN2" }, { id: "forca-maxima", title: "Força máxima · membros inferiores", status: "published", date: "2026-08-28", durationMinutes: 55 }]),
       seasons: records([{ id: "temporada-2026", name: "Temporada Olímpica 2026/27", status: "active", startsOn: "2026-08-04", endsOn: "2027-07-19" }]),
       meets: records([{ id: "trofeu-brasil", name: "Troféu Brasil - José Finkel", status: "planned", startsOn: "2026-09-18", priority: "A", pool: "50 m" }]),
       videos: records([
@@ -60,10 +62,25 @@ function seed(): DatabaseShape {
       ]),
       documents: records([]),
       staff: records([{ id: "leonardo-martins", name: "Leonardo Martins", role: "Administrador", access: "full", status: "active" }, { id: "camila-ferreira", name: "Camila Ferreira", role: "Treinadora", access: "full", status: "active" }]),
-      zones: records([{ id: "a1", name: "A1 · Regenerativo", code: "A1", color: "#55b6c8", pace: "1:38-1:48", status: "active" }, { id: "a2", name: "A2 · Aeróbio", code: "A2", color: "#2f8bc7", pace: "1:26-1:37", status: "active" }, { id: "an", name: "AN · Anaeróbio", code: "AN", color: "#e97861", pace: "1:10-1:17", status: "active" }, { id: "rp", name: "RP · Ritmo de prova", code: "RP", color: "#efb34b", pace: "Por prova", status: "active" }]),
+      zones: records([
+        { id: "valat", name: "VALAT · Velocidade alática", code: "VALAT", color: "#8f3db5", pace: "Individual", status: "active", order: 1 },
+        { id: "a1", name: "A1 · Regenerativo", code: "A1", color: "#2da7c7", pace: "1:38-1:48", status: "active", order: 2 },
+        { id: "a2", name: "A2 · Aeróbio", code: "A2", color: "#174a8c", pace: "1:26-1:37", status: "active", order: 3 },
+        { id: "a3", name: "A3 · Limiar", code: "A3", color: "#5572c8", pace: "1:18-1:25", status: "active", order: 4 },
+        { id: "an1", name: "AN1 · Tolerância anaeróbia", code: "AN1", color: "#df6b45", pace: "Individual", status: "active", order: 5 },
+        { id: "an2", name: "AN2 · Potência anaeróbia", code: "AN2", color: "#c13d4d", pace: "Individual", status: "active", order: 6 },
+      ]),
       goals: records([{ id: "ana-200-livre", name: "Ana · 200 m Livre", athleteId: "ana-souza", event: "200 m Livre", targetTime: "1:58.50", status: "active" }]),
       activities: records([]),
-      settings: records([{ id: "program", name: "Configuração do programa", organizationName: "Seleção Nacional de Natação", locale: "pt-BR", measurementSystem: "metric", primaryPool: "50 m", loadEngine: "DemoLoadEngine", status: "active" }]),
+      ingestions: records([]),
+      prescriptions: records([]),
+      results: records([]),
+      loadSnapshots: records([]),
+      adaptationDecisions: records([]),
+      governance: records([
+        { id: "rkf-v5-1", name: "Homologação RKF V5.1", status: "validation", seedExpectedSessions: 910, seedExpectedBlocks: 6226, seedImported: false, decisionRegisterOpen: true },
+      ]),
+      settings: records([{ id: "program", name: "Configuração do programa", organizationName: "Seleção Nacional de Natação", locale: "pt-BR", measurementSystem: "metric", primaryPool: "50 m", loadEngine: "RkfLoadEngine", rkfVersion: "RKF_V5.1", rkfStatus: "validation", status: "active" }]),
     },
     audit: [],
   };
@@ -72,6 +89,9 @@ function seed(): DatabaseShape {
 export class ManagedStore {
   private readonly filePath: string;
   private data: DatabaseShape;
+  private postgres?: PostgresPersistence;
+  private writeQueue: Promise<void> = Promise.resolve();
+  private persistenceError?: string;
 
   constructor(filePath = process.env.STORAGE_PATH
     ? resolve(process.env.STORAGE_PATH, "aquaos-data.json")
@@ -81,7 +101,22 @@ export class ManagedStore {
     const defaults = seed();
     this.data = existsSync(filePath) ? JSON.parse(readFileSync(filePath, "utf8")) as DatabaseShape : defaults;
     for (const kind of resourceKinds) this.data.resources[kind] ??= defaults.resources[kind];
+    for (const collection of Object.values(this.data.resources)) {
+      for (const record of collection) record.organizationId ??= "org-demo";
+    }
     if (!this.data.resources.settings.length) this.data.resources.settings = defaults.resources.settings;
+    for (const zone of defaults.resources.zones) {
+      if (!this.data.resources.zones.some((current) => current.code === zone.code)) this.data.resources.zones.push(zone);
+    }
+    for (const zone of this.data.resources.zones) {
+      if (zone.code === "AN" || zone.code === "RP") Object.assign(zone, { status: "retired", retiredAt: zone.retiredAt ?? now(), migrationNote: "Vocabulário anterior preservado apenas para histórico RKF V5.1." });
+    }
+    for (const workout of this.data.resources.workouts) {
+      if (workout.zone === "RP") workout.zone = "AN2";
+      if (workout.zone === "AN") workout.zone = "AN1";
+    }
+    const program = this.data.resources.settings.find((setting) => setting.id === "program");
+    if (program) Object.assign(program, { loadEngine: "RkfLoadEngine", rkfVersion: "RKF_V5.1", rkfStatus: "validation" });
     // Reparo: vídeos demo sem análise (data file antigo ou análise perdida) recebem a análise pré-computada.
     for (const video of this.data.resources.videos) {
       const fallback = defaults.resources.videos.find((candidate) => candidate.id === video.id);
@@ -92,6 +127,55 @@ export class ManagedStore {
     this.persist();
   }
 
+  async initialize(databaseUrl = process.env.DATABASE_URL) {
+    if (!databaseUrl) return this.persistenceHealth();
+    try {
+      this.postgres = new PostgresPersistence(databaseUrl);
+      await this.postgres.initialize();
+      const persisted = await this.postgres.load();
+      if (persisted) {
+        const defaults = seed();
+        this.data = persisted;
+        for (const kind of resourceKinds) this.data.resources[kind] ??= defaults.resources[kind];
+        this.data.audit ??= [];
+      } else {
+        await this.postgres.save(structuredClone(this.data));
+      }
+      this.persistenceError = undefined;
+      return this.persistenceHealth();
+    } catch (error) {
+      this.postgres = undefined;
+      this.persistenceError = error instanceof Error ? error.message : "Falha ao inicializar PostgreSQL";
+      if (process.env.PERSISTENCE_REQUIRED === "true") throw error;
+      return this.persistenceHealth();
+    }
+  }
+
+  persistenceHealth(): PersistenceHealth {
+    if (this.postgres) return this.postgres.health();
+    return { driver: "file", connected: true, error: this.persistenceError };
+  }
+
+  async flush() {
+    await this.writeQueue;
+    if (this.persistenceError) throw new Error(this.persistenceError);
+  }
+
+  async close() {
+    await this.flush();
+    await this.postgres?.close();
+  }
+
+  async importRkfSeed(input: RkfSeedImport) {
+    if (this.postgres) return this.postgres.importRkfSeed(input);
+    const target = resolve(dirname(this.filePath), `rkf-seed-${input.version.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.json`);
+    const temporary = `${target}.tmp`;
+    const payload = { ...input, importedAt: now(), driver: "file-atomic" };
+    writeFileSync(temporary, JSON.stringify(payload), "utf8");
+    renameSync(temporary, target);
+    return { driver: "file-atomic" as const, importId: input.id, importedRows: input.files.reduce((sum, file) => sum + file.rows.length, 0), files: input.files.length };
+  }
+
   list(kind: ResourceKind) { return this.data.resources[kind].slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); }
   get(kind: ResourceKind, id: string) { return this.data.resources[kind].find((item) => item.id === id); }
   audit(limit = 100) { return this.data.audit.slice(-limit).reverse(); }
@@ -100,7 +184,7 @@ export class ManagedStore {
     const timestamp = now();
     const record: ManagedRecord = { ...input, id: String(input.id ?? identifier(kind.slice(0, -1))), createdAt: timestamp, updatedAt: timestamp };
     this.data.resources[kind].push(record);
-    this.log(action, kind, record.id, String(record.name ?? record.title ?? record.id));
+    this.log(action, kind, record.id, String(record.name ?? record.title ?? record.id), String(record.organizationId ?? "org-demo"));
     this.persist();
     return record;
   }
@@ -109,7 +193,7 @@ export class ManagedStore {
     const record = this.get(kind, id);
     if (!record) return undefined;
     Object.assign(record, patch, { id, createdAt: record.createdAt, updatedAt: now() });
-    this.log(action, kind, id, String(record.name ?? record.title ?? id));
+    this.log(action, kind, id, String(record.name ?? record.title ?? id), String(record.organizationId ?? "org-demo"));
     this.persist();
     return record;
   }
@@ -118,18 +202,22 @@ export class ManagedStore {
     const index = this.data.resources[kind].findIndex((item) => item.id === id);
     if (index < 0) return undefined;
     const [removed] = this.data.resources[kind].splice(index, 1);
-    this.log("delete", kind, id, String(removed.name ?? removed.title ?? id));
+    this.log("delete", kind, id, String(removed.name ?? removed.title ?? id), String(removed.organizationId ?? "org-demo"));
     this.persist();
     return removed;
   }
 
   importRows(kind: ResourceKind, rows: Record<string, unknown>[]) {
-    const created = rows.map((row) => this.create(kind, row, "import"));
+    const timestamp = now();
+    const created = rows.map((row) => ({ ...row, id: String(row.id ?? identifier(kind.slice(0, -1))), createdAt: timestamp, updatedAt: timestamp } as ManagedRecord));
+    this.data.resources[kind].push(...created);
+    for (const record of created) this.log("import", kind, record.id, String(record.name ?? record.title ?? record.id), String(record.organizationId ?? "org-demo"));
+    this.persist();
     return { imported: created.length, records: created };
   }
 
-  private log(action: AuditRecord["action"], resource: ResourceKind, resourceId: string | undefined, label: string) {
-    this.data.audit.push({ id: identifier("audit"), action, resource, resourceId, summary: `${action}: ${label}`, createdAt: now() });
+  private log(action: AuditRecord["action"], resource: ResourceKind, resourceId: string | undefined, label: string, organizationId = "org-demo") {
+    this.data.audit.push({ id: identifier("audit"), action, resource, resourceId, summary: `${action}: ${label}`, createdAt: now(), organizationId });
     if (this.data.audit.length > 1000) this.data.audit = this.data.audit.slice(-1000);
   }
 
@@ -137,14 +225,40 @@ export class ManagedStore {
     const temporary = `${this.filePath}.tmp`;
     writeFileSync(temporary, JSON.stringify(this.data, null, 2), "utf8");
     renameSync(temporary, this.filePath);
+    if (this.postgres) {
+      const snapshot = structuredClone(this.data);
+      this.writeQueue = this.writeQueue.then(() => this.postgres!.save(snapshot)).catch((error: unknown) => {
+        this.persistenceError = error instanceof Error ? error.message : "Falha ao persistir no PostgreSQL";
+      });
+    }
   }
 }
 
 export function parseDelimited(text: string) {
-  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim());
-  if (lines.length < 2) return [];
-  const separator = (lines[0].match(/;/g)?.length ?? 0) > (lines[0].match(/,/g)?.length ?? 0) ? ";" : ",";
-  const read = (line: string) => line.split(separator).map((value) => value.trim().replace(/^"|"$/g, ""));
-  const headers = read(lines[0]).map((header) => header.toLowerCase().replace(/\s+/g, "_"));
-  return lines.slice(1).map((line) => Object.fromEntries(read(line).map((value, index) => [headers[index] ?? `field_${index}`, value])));
+  const source = text.replace(/^\uFEFF/, "");
+  const firstLine = source.split(/\r?\n/, 1)[0] ?? "";
+  const separator = (firstLine.match(/;/g)?.length ?? 0) > (firstLine.match(/,/g)?.length ?? 0) ? ";" : ",";
+  const table: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '"') {
+      if (quoted && source[index + 1] === '"') { field += '"'; index += 1; }
+      else quoted = !quoted;
+    } else if (character === separator && !quoted) {
+      row.push(field.trim()); field = "";
+    } else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && source[index + 1] === "\n") index += 1;
+      row.push(field.trim()); field = "";
+      if (row.some((value) => value.length)) table.push(row);
+      row = [];
+    } else field += character;
+  }
+  row.push(field.trim());
+  if (row.some((value) => value.length)) table.push(row);
+  if (table.length < 2) return [];
+  const headers = table[0].map((header) => header.toLowerCase().replace(/[^a-z0-9À-ÿ]+/gi, "_").replace(/^_|_$/g, ""));
+  return table.slice(1).map((values) => Object.fromEntries(values.map((value, index) => [headers[index] || `field_${index}`, value])));
 }

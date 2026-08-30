@@ -1,0 +1,12 @@
+﻿material_code,material_name,category,primary_use,rkf_constraint
+PALMAR_P,Palmar pequeno,Força/sensibilidade,Amplificar apoio com baixa sobrecarga,Preservar ombro e trajetória.
+PALMAR_M,Palmar médio,Força específica,Aumentar resistência de apoio,Evitar perda técnica.
+PALMAR_G,Palmar grande,Força específica alta,Maior resistência,Uso criterioso.
+FINS,Pé de pato,Técnica/velocidade,"Posição corporal, submerso, velocidade",Não assumir automaticamente carga alta.
+PARA,Paraquedas P/M/G,Resistido,Força específica / contraste,Transferir para nado limpo.
+DRAG,Drag socks,Resistido,Força/contraste,Preservar alinhamento.
+SHIRT,Camisa,Resistido,Arrasto global,Transferência posterior.
+SHORT,Short,Resistido,Arrasto global,Transferência posterior.
+BOARD,Prancha,Perna,Organizar pernas,Alternar posições quando necessário.
+PULL,Pull buoy,Braço,Estabilizar pernas,Não mascarar posição corporal.
+SNORKEL,Snorkel,Técnica/aeróbio,Retirar interferência respiratória,Usar quando coerente.

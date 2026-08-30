@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 import {
-  ArrowRight, BarChart3, Bell, Calendar, ChevronDown, CircleCheck, Film, Home, Inbox, Link2,
+  ArrowRight, BarChart3, Bell, Calendar, ChevronDown, CircleCheck, Film, Gauge, Home, Inbox, Link2,
   Menu, MoreHorizontal, Plus, Search, Settings, SlidersHorizontal, Sparkles, Trophy, Users, Waves,
   Wifi,
 } from "lucide-react";
@@ -16,19 +16,22 @@ import { ConnectionDialog, InviteModal, MeetDetail, QuickCreate, VideoReview, Wo
 import { ManagementCenter, type ManagementKind } from "./management";
 import type { WorkoutSeed } from "./workout-library-actions";
 import { AiAssistant } from "./ai-assistant";
+import { RkfOperations } from "./rkf-operations";
+import { apiRequest } from "./api";
 
 type Modal = "workout" | "invite" | "video" | "meet" | "command" | "manage" | "connection" | null;
 
 const routes: Record<AppView, string> = {
   today: "/pt/coach/today", athletes: "/pt/coach/athletes", practices: "/pt/coach/practices",
   seasons: "/pt/coach/seasons", videos: "/pt/coach/videos", analytics: "/pt/coach/analytics",
-  inbox: "/pt/coach/inbox", integrations: "/pt/coach/integrations", settings: "/pt/coach/settings",
+  rkf: "/pt/coach/rkf", inbox: "/pt/coach/inbox", integrations: "/pt/coach/integrations", settings: "/pt/coach/settings",
 };
 
 const nav: { id: AppView; label: string; icon: LucideIcon; badge?: number }[] = [
   { id: "today", label: "Hoje", icon: Home }, { id: "athletes", label: "Equipe", icon: Users },
   { id: "practices", label: "Treinos", icon: Calendar }, { id: "seasons", label: "Temporada", icon: Trophy },
   { id: "videos", label: "Vídeos", icon: Film, badge: 2 }, { id: "analytics", label: "Análise", icon: BarChart3 },
+  { id: "rkf", label: "Núcleo RKF", icon: Gauge },
   { id: "inbox", label: "Novidades", icon: Inbox, badge: 5 }, { id: "integrations", label: "Integrações", icon: Link2 },
 ];
 
@@ -38,6 +41,7 @@ function viewFromPath(pathname: string): AppView {
   if (pathname.includes("/seasons") || pathname.includes("/meets")) return "seasons";
   if (pathname.includes("/videos") || pathname.includes("/entries")) return "videos";
   if (pathname.includes("/analytics")) return "analytics";
+  if (pathname.includes("/rkf")) return "rkf";
   if (pathname.includes("/inbox")) return "inbox";
   if (pathname.includes("/integrations")) return "integrations";
   if (pathname.includes("/settings")) return "settings";
@@ -73,6 +77,7 @@ export default function Dashboard() {
   ] : [];
   const selectSearch = (action: () => void) => { action(); setSearch(""); };
   useEffect(() => {
+    void apiRequest("/api/v1/auth/me").catch(() => process.env.NODE_ENV !== "production" ? apiRequest("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "coach@natacao.local", password: "natacao-demo" }) }) : undefined);
     const shortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); searchInput.current?.focus(); }
       if (event.key === "Escape") setSearch("");
@@ -85,7 +90,7 @@ export default function Dashboard() {
     <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
       <button className="brand" onClick={() => go("today")}>
         <span className="brand-mark"><Waves size={21} /></span>
-        <span><strong>Aqua<em>OS</em></strong><small>Performance Lab</small></span>
+        <span><strong>RKF <em>Coach</em></strong><small>Alto rendimento</small></span>
       </button>
       <button className="team-switch" onClick={() => openManage("settings")}><span className="team-badge">SN</span><span><strong>Seleção Nacional</strong><small>Programa principal</small></span><ChevronDown size={15} /></button>
       <nav className="main-nav">
@@ -96,7 +101,7 @@ export default function Dashboard() {
         <button className={view === "settings" ? "active" : ""} onClick={() => go("settings")}><Settings size={18} /><span>Configurações</span></button>
       </nav>
       <div className="sidebar-footer">
-        <div className="demo-notice"><Sparkles size={17} /><span><strong>Motor demonstrativo</strong><small>Dados sintéticos · v1.4</small></span></div>
+        <div className="demo-notice"><Sparkles size={17} /><span><strong>Método RKF V5.1</strong><small>Núcleo em validação</small></span></div>
         <div className="coach-card"><Avatar initials="LM" color="#d9ece8" small /><span><strong>Leonardo Martins</strong><small>Head coach</small></span><MoreHorizontal size={18} /></div>
       </div>
     </aside>
@@ -115,6 +120,7 @@ export default function Dashboard() {
         {view === "seasons" && <Season onMeet={(id) => { setMeetId(id); setModal("meet"); }} onSettings={() => go("settings")} onCreateMeet={() => openManage("meets", true)} onNotify={notify} />}
         {view === "videos" && <Videos onVideo={(id) => { setVideoId(id); setModal("video"); }} onNotify={notify} />}
         {view === "analytics" && <Analytics onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} />}
+        {view === "rkf" && <RkfOperations onNotify={notify} />}
         {view === "inbox" && <News onNavigate={go} onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} />}
         {view === "integrations" && <Integrations onNotify={notify} onCreateConnection={(provider = "garmin") => { setConnectionProvider(provider); setModal("connection"); }} />}
         {view === "settings" && <ProgramSettings onNotify={notify} />}

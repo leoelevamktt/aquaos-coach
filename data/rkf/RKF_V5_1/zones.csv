@@ -1,0 +1,7 @@
+﻿zone_code,zone_name,effort_definition,primary_system,rkf_rule,external_mapping
+VALAT,Velocidade alática,"2,5–25 m de qualidade máxima",Neuromuscular / potência,Recuperação ampla; reduzir/parar se cair velocidade ou técnica.,SP3
+A1,Aeróbio leve,Baixa intensidade sustentável,Base / recuperação ativa,Técnica estável e baixa deriva.,EN1
+A2,Aeróbio estável,Ritmo aeróbio controlado,Capacidade aeróbia,"Estabilidade de ritmo, braçadas e PSE; não migrar para A3.",EN2
+A3,Aeróbio intenso,"Acima de A2, controlado",Potência aeróbia,Qualidade alta com volume menor que A2.,EN3
+AN1,Anaeróbio 1,Produção anaeróbia específica,Anaeróbio,Manter velocidade e mecânica.,SP1
+AN2,Anaeróbio 2,Esforço anaeróbio muito elevado,Potência anaeróbia,Volume controlado e recuperação ampla.,SP2

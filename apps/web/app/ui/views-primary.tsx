@@ -5,12 +5,12 @@ import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, Calendar, Camera,
   ChevronLeft, ChevronRight, CircleCheck, Clock, Download, Dumbbell, FileText,
   Film, Gauge, HeartPulse, Library, MapPin, MessageSquare, Mic, Moon, MoreHorizontal,
-  Plus, Search, SlidersHorizontal, Sparkles, Target, Trophy, Upload, UserPlus,
+  Plus, Search, SlidersHorizontal, Smartphone, Sparkles, Target, Trophy, Upload, UserPlus,
   UserRound, Users, Watch, Waves,
 } from "lucide-react";
 import { athletes, insights, practices, strengthLibrary, workoutLibrary, zoneDistribution } from "./demo-data";
 import { Avatar, formatNumber, Metric, PageTitle, ProgressRing, SectionHead, StatusDot } from "./components";
-import { apiRequest, importFile } from "./api";
+import { API_URL, apiRequest, importFile } from "./api";
 import { csvRow, downloadFile } from "./client-utils";
 import {
   AthleteMessageDialog, BodyReadinessDialog, EvidenceDialog, GoalEditor, MethodologyDialog, exportAthletePerformance,
@@ -18,7 +18,7 @@ import {
 } from "./athlete-performance-actions";
 import { WorkoutTemplateEditor, type WorkoutSeed } from "./workout-library-actions";
 
-export type AppView = "today" | "athletes" | "practices" | "seasons" | "videos" | "analytics" | "inbox" | "integrations" | "settings";
+export type AppView = "today" | "athletes" | "practices" | "seasons" | "videos" | "analytics" | "rkf" | "inbox" | "integrations" | "settings";
 
 export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate: () => void; onNavigate: (view: AppView) => void; onAthlete: (id: string) => void; onNotify: (message: string) => void }) {
   const exportDailyReport = () => {
@@ -55,8 +55,8 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate:
           </div>
         </article>
         <article className="card">
-          <SectionHead title="Na água hoje" subtitle="6 atletas · 5.200 m · RP" action="Ver sessão" onAction={() => onNavigate("practices")} />
-          <div className="session-strip"><div className="session-time"><Clock size={15} /><b>07:30</b></div><div><strong>Ritmo de prova · 200 Livre</strong><small>3 blocos · 1h42 estimados · Piscina olímpica</small></div><span className="zone-tag rp">RP</span></div>
+          <SectionHead title="Na água hoje" subtitle="6 atletas · 5.200 m · AN2" action="Ver sessão" onAction={() => onNavigate("practices")} />
+          <div className="session-strip"><div className="session-time"><Clock size={15} /><b>07:30</b></div><div><strong>Ritmo de prova · 200 Livre</strong><small>3 blocos · 1h42 estimados · Piscina olímpica</small></div><span className="zone-tag an2">AN2</span></div>
           <div className="water-list">
             {athletes.slice(0, 4).map((athlete) => <button key={athlete.id} onClick={() => onAthlete(athlete.id)}><Avatar initials={athlete.initials} color={athlete.color} small /><span><b>{athlete.name}</b><small>{athlete.group}</small></span><em>{formatNumber(athlete.weeklyDistance)} m</em><ProgressRing value={athlete.readiness ?? 0} size="small" /></button>)}
           </div>
@@ -71,7 +71,7 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate:
           <SectionHead title="Carga da equipe" subtitle="Últimas 8 semanas" action="Analisar" onAction={() => onNavigate("analytics")} />
           <div className="mini-bars">{[42, 56, 51, 68, 72, 65, 81, 76].map((height, index) => <span key={index} style={{ height: `${height}%` }} className={index === 7 ? "current" : ""} />)}</div>
           <div className="load-summary"><div><small>AGUDA</small><b>538</b></div><div><small>CRÔNICA</small><b>504</b></div><div><small>ACWR</small><b>1,07</b></div></div>
-          <p className="demo-caption"><Sparkles size={13} />Estimativa do motor demonstrativo. Não representa o método oficial.</p>
+          <p className="demo-caption"><Sparkles size={13} />RkfLoadEngine V5.1 com dados sintéticos de validação.</p>
         </article>
       </aside>
     </section>
@@ -115,11 +115,15 @@ export function AthleteDetail({ athlete, onBack, onCreate, onNavigate, onNotify 
     exportAthletePerformance(athlete, goal);
     onNotify("Volume e intensidade exportados em CSV.");
   };
+  const exportPdf = () => {
+    window.open(`${API_URL}/api/v1/reports/athletes/${athlete.id}.pdf`, "_blank", "noopener,noreferrer");
+    onNotify("Relatório RKF em PDF gerado pelo backend.");
+  };
   return <>
     <button className="back-button" onClick={onBack}><ChevronLeft size={17} />Voltar para equipe</button>
     <div className="athlete-hero">
       <div className="athlete-identity"><Avatar initials={athlete.initials} color={athlete.color} /><div><span className="eyebrow">{athlete.group}</span><h1>{athlete.name}</h1><p>{athlete.handle} · {athlete.age} anos · Especialista em {athlete.stroke}</p></div></div>
-      <div className="athlete-hero-actions"><button className="secondary-button" onClick={() => setPanel("message")}><MessageSquare size={17} />Mensagem</button><button className="primary-button" onClick={onCreate}><Plus size={17} />Atribuir treino</button></div>
+      <div className="athlete-hero-actions"><button className="secondary-button" onClick={() => window.location.assign("/pt/athlete/home")}><Smartphone size={17} />Área do atleta</button><button className="secondary-button" onClick={() => setPanel("message")}><MessageSquare size={17} />Mensagem</button><button className="primary-button" onClick={onCreate}><Plus size={17} />Atribuir treino</button></div>
     </div>
     <section className="athlete-dashboard">
       <div className="stack">
@@ -134,15 +138,15 @@ export function AthleteDetail({ athlete, onBack, onCreate, onNavigate, onNotify 
               <div><dt>Ritmo observado</dt><dd>{pacing.observedPerWeek.toFixed(2)} s/sem</dd></div>
               <div><dt>Projeção</dt><dd>{pacing.projectedTime}</dd></div>
             </dl>
-            <p className="demo-caption"><Sparkles size={13} />Projeção do motor demonstrativo a partir da tendência recente. Não substitui a leitura do treinador.</p>
+            <p className="demo-caption"><Sparkles size={13} />Projeção RKF em validação. A decisão final permanece com o treinador.</p>
           </div>}</> : <div className="empty-state"><Target size={27} /><strong>Nenhum objetivo definido</strong><p>Cadastre uma prova e uma marca para iniciar o acompanhamento.</p><button className="secondary-button" onClick={() => setPanel("goal")}>Criar objetivo</button></div>}
         </article>
         <article className="card">
           <SectionHead title="Cinco habilidades" subtitle="Evidências de prova + treino | confiança média de 84%" action="Ver metodologia" onAction={() => setPanel("methodology")} />
           <div className="skill-grid">{athlete.skills.map((skill) => <div className="skill-card" key={skill.key}><div><span>{skill.key}</span><small>{skill.label}</small></div><strong>{skill.score}</strong><span className={skill.trend >= 0 ? "positive" : "negative"}>{skill.trend >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}{Math.abs(skill.trend)}</span><div className="skill-bar"><i style={{ width: `${skill.score}%` }} /></div></div>)}</div>
-          <div className="supporting-proof"><Sparkles size={18} /><div><span>O QUE SUSTENTA O NÍVEL</span><b>Ritmo sustentado nos últimos 3 x 100 da prova</b><small>Vídeo de 23 ago + treino RP de 25 ago | consistência alta</small></div><button className="text-button" onClick={() => setPanel("evidence")}>Ver evidências <ArrowRight size={15} /></button></div>
+          <div className="supporting-proof"><Sparkles size={18} /><div><span>O QUE SUSTENTA O NÍVEL</span><b>Ritmo sustentado nos últimos 3 x 100 da prova</b><small>Vídeo de 23 ago + treino AN2 de 25 ago | consistência alta</small></div><button className="text-button" onClick={() => setPanel("evidence")}>Ver evidências <ArrowRight size={15} /></button></div>
         </article>
-        <article className="card volume-panel"><SectionHead title="Volume e intensidade" subtitle="Últimas 8 semanas" action="Exportar CSV" onAction={exportPerformance} /><div className="volume-chart">{[52, 66, 61, 72, 78, 69, 86, 81].map((height, index) => <div key={index}><span style={{ height: `${height}%` }} className={index === 7 ? "current" : ""} /><small>S{index + 1}</small></div>)}</div><div className="zone-stack">{zoneDistribution.map((zone) => <span key={zone.code} style={{ width: `${zone.percent}%`, background: zone.color }} title={`${zone.code}: ${zone.percent}%`} />)}</div><div className="zone-legend">{zoneDistribution.map((zone) => <span key={zone.code}><i style={{ background: zone.color }} />{zone.code} {zone.percent}%</span>)}</div><div className="export-footnote"><Download size={14} /><span>O arquivo inclui prescrito, realizado, aderência e metros por zona.</span></div></article>
+        <article className="card volume-panel"><SectionHead title="Volume e intensidade" subtitle="Últimas 8 semanas" action="Exportar CSV" onAction={exportPerformance} /><div className="volume-chart">{[52, 66, 61, 72, 78, 69, 86, 81].map((height, index) => <div key={index}><span style={{ height: `${height}%` }} className={index === 7 ? "current" : ""} /><small>S{index + 1}</small></div>)}</div><div className="zone-stack">{zoneDistribution.map((zone) => <span key={zone.code} style={{ width: `${zone.percent}%`, background: zone.color }} title={`${zone.code}: ${zone.percent}%`} />)}</div><div className="zone-legend">{zoneDistribution.map((zone) => <span key={zone.code}><i style={{ background: zone.color }} />{zone.code} {zone.percent}%</span>)}</div><div className="export-footnote"><Download size={14} /><span>O arquivo inclui prescrito, realizado, aderência e metros por zona.</span><button className="text-button" onClick={exportPdf}><FileText size={14} />Relatório PDF</button></div></article>
       </div>
       <aside className="stack">
         <article className="card body-card"><SectionHead title="Corpo e prontidão" subtitle={athlete.lastBodySync ?? "Sem sincronização"} action="Detalhes" onAction={() => setPanel("body")} />{athlete.readiness ? <><div className="body-overview"><ProgressRing value={athlete.readiness} label="PRONTO" size="large" /><div><span><Moon size={16} /><small>SONO</small><b>{athlete.sleep} h</b></span><span><HeartPulse size={16} /><small>RECUPERAÇÃO</small><b>{athlete.recovery}%</b></span></div></div><div className="body-grid"><div><small>HRV</small><b>{athlete.hrv} ms</b><span className="positive">↑ 4%</span></div><div><small>FCR</small><b>{athlete.restingHr} bpm</b><span>estável</span></div><div><small>SNC</small><b>Bom</b><span>sem alerta</span></div><div><small>MOTOR</small><b>92%</b><span className="positive">ótimo</span></div></div></> : <div className="empty-state compact"><Watch size={26} /><strong>Sem dados de corpo</strong><p>Conecte um wearable para sono, HRV e recuperação.</p><button className="secondary-button" onClick={() => onNavigate("integrations")}>Conectar dispositivo</button></div>}</article>
@@ -158,46 +162,55 @@ export function AthleteDetail({ athlete, onBack, onCreate, onNavigate, onNotify 
   </>;
 }
 
-type PublishedWorkoutRecord = { id: string; title?: string; status?: string; date?: string; distanceMeters?: number; zone?: string; kind?: string; target?: string; source?: string };
+type PublishedWorkoutRecord = { id: string; title?: string; status?: string; date?: string; scheduledAt?: string; distanceMeters?: number; zone?: string; kind?: string; target?: string; source?: string; prescriptionText?: string; blocks?: string[] };
 
 export function Practices({ onCreate, onNotify, refreshToken = 0 }: { onCreate: (seed?: WorkoutSeed) => void; onNotify: (message: string) => void; refreshToken?: number }) {
   const [tab, setTab] = useState<"week" | "swim" | "strength">("week");
   const [editor, setEditor] = useState<{ initial?: WorkoutSeed } | null>(null);
   const [published, setPublished] = useState<PublishedWorkoutRecord[]>([]);
+  const [libraryRecords, setLibraryRecords] = useState<PublishedWorkoutRecord[]>([]);
+  const [libraryRefresh, setLibraryRefresh] = useState(0);
   useEffect(() => {
     apiRequest<{ data: PublishedWorkoutRecord[] }>("/api/v1/manage/workouts")
-      .then((response) => setPublished(response.data.filter((item) => item.source === "coach-publish")))
-      .catch(() => setPublished([]));
-  }, [refreshToken]);
+      .then((response) => { setPublished(response.data.filter((item) => item.source === "coach-publish")); setLibraryRecords(response.data.filter((item) => item.source === "library")); })
+      .catch(() => { setPublished([]); setLibraryRecords([]); });
+  }, [refreshToken, libraryRefresh]);
   return <>
     <PageTitle kicker="PLANEJAMENTO" title="Treinos" subtitle="Prescreva, personalize e publique sem duplicar sessões."><button className="secondary-button" onClick={() => setTab("swim")}><Library size={17} />Bibliotecas</button><button className="primary-button" onClick={() => onCreate()}><Plus size={17} />Criar treino</button></PageTitle>
     <div className="tab-bar"><button className={tab === "week" ? "active" : ""} onClick={() => setTab("week")}><Calendar size={16} />Semana</button><button className={tab === "swim" ? "active" : ""} onClick={() => setTab("swim")}><Waves size={16} />Biblioteca de natação</button><button className={tab === "strength" ? "active" : ""} onClick={() => setTab("strength")}><Dumbbell size={16} />Biblioteca de força</button></div>
     {tab === "week" && <WeekCalendar onCreate={onCreate} published={published} />}
-    {tab === "swim" && <LibraryView kind="swim" onUse={onCreate} onEdit={(initial) => setEditor({ initial })} />}
-    {tab === "strength" && <LibraryView kind="strength" onUse={onCreate} onEdit={(initial) => setEditor({ initial })} />}
-    {editor && <WorkoutTemplateEditor initial={editor.initial} onClose={() => setEditor(null)} onUse={(seed) => { setEditor(null); onCreate(seed); }} onNotify={onNotify} />}
+    {tab === "swim" && <LibraryView kind="swim" records={libraryRecords} onUse={onCreate} onEdit={(initial) => setEditor({ initial })} />}
+    {tab === "strength" && <LibraryView kind="strength" records={libraryRecords} onUse={onCreate} onEdit={(initial) => setEditor({ initial })} />}
+    {editor && <WorkoutTemplateEditor initial={editor.initial} onClose={() => setEditor(null)} onUse={(seed) => { setEditor(null); onCreate(seed); }} onNotify={onNotify} onSaved={() => setLibraryRefresh((value) => value + 1)} />}
   </>;
 }
 
 function WeekCalendar({ onCreate, published }: { onCreate: (seed?: WorkoutSeed) => void; published: PublishedWorkoutRecord[] }) {
   const [weekOffset, setWeekOffset] = useState(0);
-  const days = [
-    { day: "SEG", date: "24", load: 640, sessions: [] as typeof practices }, { day: "TER", date: "25", load: 715, sessions: [] as typeof practices },
-    { day: "QUA", date: "26", load: 580, sessions: [] as typeof practices }, { day: "QUI", date: "27", load: 690, sessions: [] as typeof practices },
-    { day: "SEX", date: "28", load: 820, sessions: practices.filter((p) => p.date === "2026-08-28") },
-    { day: "SÁB", date: "29", load: 420, sessions: [...practices.filter((p) => p.date === "2026-08-29"), ...published.filter((p) => p.date === "2026-08-29").map((p) => ({ id: p.id, date: p.date ?? "2026-08-29", day: "SÁB", title: p.title ?? "Treino publicado", distance: Number(p.distanceMeters ?? 0), zone: p.zone ?? "A1", type: p.kind === "strength" ? "strength" : "swim", time: "08:00", status: "published", group: p.target ?? "Equipe inteira", rpe: 6 }))] },
-    { day: "DOM", date: "30", load: 0, sessions: [] as typeof practices },
-  ];
-  const weekLabel = weekOffset === 0 ? "24 - 30 de agosto de 2026" : weekOffset < 0 ? `${Math.abs(weekOffset)} semana(s) anterior(es)` : `${weekOffset} semana(s) seguinte(s)`;
-  return <section className="card calendar-card"><div className="calendar-toolbar"><div><button className="icon-button" aria-label="Semana anterior" onClick={() => setWeekOffset((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Próxima semana" onClick={() => setWeekOffset((value) => value + 1)}><ChevronRight size={18} /></button><button className="secondary-button small" onClick={() => setWeekOffset(0)}>Esta semana</button></div><strong>{weekLabel}</strong><div className="week-load"><Sparkles size={15} />Carga prevista <b>{weekOffset === 0 ? "3.865" : "0"}</b></div></div><div className="week-grid">{days.map((item) => <div className={`day-column ${weekOffset === 0 && item.date === "28" ? "today" : ""}`} key={item.date}><div className="day-head"><span>{item.day}</span><b>{item.date}</b><small>{weekOffset === 0 && item.load ? `${item.load} u.a.` : "Descanso"}</small></div><div className="day-content">{weekOffset === 0 && item.sessions.length ? item.sessions.map((practice) => <button className={`practice-card ${practice.type}`} key={practice.id} onClick={() => onCreate()}><span><i />{practice.time}</span><strong>{practice.title}</strong><small>{practice.distance ? `${formatNumber(practice.distance)} m` : "55 min"} · {practice.group}</small><div><span className={`zone-tag ${practice.zone.toLowerCase()}`}>{practice.zone}</span><em>{practice.status === "published" ? <><CircleCheck size={12} />Publicado</> : "Rascunho"}</em></div></button>) : <button className="empty-day" onClick={() => onCreate()}><Plus size={17} />Planejar o dia</button>}</div></div>)}</div><div className="calendar-footer"><div><span><i className="swim-dot" />Natação</span><span><i className="strength-dot" />Força</span><span><i className="draft-dot" />Rascunho</span></div><p><Sparkles size={14} />Carga calculada com o motor demonstrativo</p></div></section>;
+  const base = Date.UTC(2026, 7, 24 + weekOffset * 7, 12);
+  const names = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"];
+  const months = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+  const dates = Array.from({ length: 7 }, (_, index) => new Date(base + index * 86_400_000));
+  const days = dates.map((date) => {
+    const iso = date.toISOString().slice(0, 10);
+    const synced = published.filter((record) => record.date === iso).map((record) => ({ id: record.id, date: iso, day: names[date.getUTCDay()], title: record.title ?? "Treino publicado", distance: Number(record.distanceMeters ?? 0), zone: record.zone ?? "A1", type: (record.kind === "strength" ? "strength" : "swim") as "strength" | "swim", time: record.scheduledAt?.slice(11, 16) ?? "08:00", status: "published" as const, group: record.target ?? "Equipe inteira", rpe: 6 }));
+    const sessions = [...practices.filter((practice) => practice.date === iso), ...synced];
+    return { iso, day: names[date.getUTCDay()], date: String(date.getUTCDate()).padStart(2, "0"), load: Math.round(sessions.reduce((sum, session) => sum + session.distance, 0) / 8), sessions };
+  });
+  const first = dates[0]; const last = dates[6];
+  const weekLabel = `${String(first.getUTCDate()).padStart(2, "0")} ${first.getUTCMonth() !== last.getUTCMonth() ? `de ${months[first.getUTCMonth()]} ` : ""}- ${String(last.getUTCDate()).padStart(2, "0")} de ${months[last.getUTCMonth()]} de ${last.getUTCFullYear()}`;
+  const totalLoad = days.reduce((sum, day) => sum + day.load, 0);
+  return <section className="card calendar-card"><div className="calendar-toolbar"><div><button className="icon-button" aria-label="Semana anterior" onClick={() => setWeekOffset((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Próxima semana" onClick={() => setWeekOffset((value) => value + 1)}><ChevronRight size={18} /></button><button className="secondary-button small" onClick={() => setWeekOffset(0)}>Esta semana</button></div><strong>{weekLabel}</strong><div className="week-load"><Sparkles size={15} />Carga prevista <b>{formatNumber(totalLoad)}</b></div></div><div className="week-grid">{days.map((item) => <div className={`day-column ${item.iso === "2026-08-29" ? "today" : ""}`} key={item.iso}><div className="day-head"><span>{item.day}</span><b>{item.date}</b><small>{item.load ? `${item.load} u.a.` : "Descanso"}</small></div><div className="day-content">{item.sessions.length ? item.sessions.map((practice) => <button className={`practice-card ${practice.type}`} key={practice.id} onClick={() => onCreate({ title: practice.title, prompt: `${practice.title}\n${practice.distance ? `${practice.distance} m` : "Sessão de força"}\n${practice.group}`, distanceMeters: practice.distance, zone: practice.zone, kind: practice.type === "strength" ? "strength" : "swim" })}><span><i />{practice.time}</span><strong>{practice.title}</strong><small>{practice.distance ? `${formatNumber(practice.distance)} m` : "55 min"} · {practice.group}</small><div><span className={`zone-tag ${practice.zone.toLowerCase()}`}>{practice.zone}</span><em>{practice.status === "published" ? <><CircleCheck size={12} />Publicado</> : "Rascunho"}</em></div></button>) : <button className="empty-day" onClick={() => onCreate()}><Plus size={17} />Planejar o dia</button>}</div></div>)}</div><div className="calendar-footer"><div><span><i className="swim-dot" />Natação</span><span><i className="strength-dot" />Força</span><span><i className="draft-dot" />Rascunho</span></div><p><Sparkles size={14} />Carga calculada pelo RkfLoadEngine V5.1</p></div></section>;
 }
 
-function LibraryView({ kind, onUse, onEdit }: { kind: "swim" | "strength"; onUse: (seed: WorkoutSeed) => void; onEdit: (initial?: WorkoutSeed) => void }) {
-  const items = kind === "swim" ? workoutLibrary : strengthLibrary;
+function LibraryView({ kind, records, onUse, onEdit }: { kind: "swim" | "strength"; records: PublishedWorkoutRecord[]; onUse: (seed: WorkoutSeed) => void; onEdit: (initial?: WorkoutSeed) => void }) {
+  const staticItems = (kind === "swim" ? workoutLibrary.map((item) => ({ id: item.id, title: item.title, distanceMeters: item.distance, zone: item.zone, kind: "swim", prompt: item.blocks.join("\n"), lines: item.blocks, meta: `${formatNumber(item.distance)} m · ${item.duration}` })) : strengthLibrary.map((item) => ({ id: item.id, title: item.title, distanceMeters: 0, zone: "FORÇA", kind: "strength", prompt: item.exercises.join("\n"), lines: item.exercises, meta: `${item.duration} · ${item.tonnage}` }))) as Array<{ id: string; title: string; distanceMeters: number; zone: string; kind: string; prompt: string; lines: string[]; meta: string }>;
+  const dynamicItems = records.filter((record) => (record.kind ?? "swim") === kind).map((record) => ({ id: record.id, title: record.title ?? "Modelo sem título", distanceMeters: Number(record.distanceMeters ?? 0), zone: record.zone ?? (kind === "swim" ? "A1" : "FORÇA"), kind, prompt: record.prescriptionText ?? record.blocks?.join("\n") ?? "", lines: record.blocks ?? record.prescriptionText?.split("\n").filter(Boolean) ?? [], meta: kind === "swim" ? `${formatNumber(Number(record.distanceMeters ?? 0))} m · personalizado` : "Modelo personalizado" }));
+  const items = [...staticItems.filter((item) => !dynamicItems.some((record) => record.id === item.id)), ...dynamicItems];
   const [query, setQuery] = useState("");
   const [focus, setFocus] = useState("");
-  const shown = items.filter((item) => `${item.title} ${("blocks" in item ? item.blocks : item.exercises).join(" ")}`.toLowerCase().includes(query.toLowerCase()) && (!focus || JSON.stringify(item).toLowerCase().includes(focus.toLowerCase())));
+  const shown = items.filter((item) => `${item.title} ${item.lines.join(" ")}`.toLowerCase().includes(query.toLowerCase()) && (!focus || JSON.stringify(item).toLowerCase().includes(focus.toLowerCase())));
   const focusOptions = kind === "swim" ? zoneDistribution.map((zone) => zone.code) : ["Força máxima", "Potência", "Prevenção", "Core"];
   return <section className="library-layout"><aside className="card library-filters"><b>Filtros</b><label>Buscar</label><div className="local-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome ou conteúdo" /></div><label>{kind === "swim" ? "Zona principal" : "Foco"}</label>{focusOptions.map((item) => <button className={focus === item ? "active" : ""} key={item} onClick={() => setFocus(focus === item ? "" : item)}>{kind === "swim" ? <StatusDot /> : <Dumbbell size={15} />}<span>{item}</span></button>)}</aside><div><SectionHead title={kind === "swim" ? "Biblioteca de natação" : "Biblioteca de força"} subtitle={`${shown.length} modelos prontos para adaptar`} action="Novo modelo" onAction={() => onEdit()} />
-      <div className="library-grid">{shown.map((item) => { const lines = "blocks" in item ? item.blocks : item.exercises; const seed: WorkoutSeed = { title: item.title, prompt: lines.join("\n"), distanceMeters: "distance" in item ? item.distance : 0, zone: "zone" in item ? item.zone : "FORÇA", kind }; return <article className="card library-card" key={item.id}><div className="library-card-top"><span className={`option-icon ${kind === "swim" ? "aqua" : "violet"}`}>{kind === "swim" ? <Waves size={19} /> : <Dumbbell size={19} />}</span><button className="icon-button" aria-label={`Editar ${item.title}`} onClick={() => onEdit(seed)}><MoreHorizontal size={17} /></button></div><h3>{item.title}</h3><p>{kind === "swim" && "distance" in item ? `${formatNumber(item.distance)} m · ${item.duration}` : "tonnage" in item ? `${item.duration} · ${item.tonnage}` : ""}</p><div className="library-blocks">{lines.map((line) => <span key={line}>{line}</span>)}</div><div className="library-card-actions"><button className="secondary-button" onClick={() => onEdit(seed)}>Editar modelo</button><button className="primary-button" onClick={() => onUse(seed)}>Usar no calendário <ArrowRight size={15} /></button></div></article>; })}</div></div></section>;
+      <div className="library-grid">{shown.map((item) => { const seed: WorkoutSeed = { id: item.id, title: item.title, prompt: item.prompt, distanceMeters: item.distanceMeters, zone: item.zone, kind }; return <article className="card library-card" key={item.id}><div className="library-card-top"><span className={`option-icon ${kind === "swim" ? "aqua" : "violet"}`}>{kind === "swim" ? <Waves size={19} /> : <Dumbbell size={19} />}</span><button className="icon-button" aria-label={`Editar ${item.title}`} onClick={() => onEdit(seed)}><MoreHorizontal size={17} /></button></div><h3>{item.title}</h3><p>{item.meta}</p><div className="library-blocks">{item.lines.map((line) => <span key={line}>{line}</span>)}</div><div className="library-card-actions"><button className="secondary-button" onClick={() => onEdit(seed)}>Editar modelo</button><button className="primary-button" onClick={() => onUse(seed)}>Usar no calendário <ArrowRight size={15} /></button></div></article>; })}</div></div></section>;
 }

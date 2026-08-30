@@ -1,0 +1,110 @@
+# Compose otimizado para EC2 t3.small (2 vCPU / 2 GB RAM) — validação de 2 meses
+# Diferenças vs docker-compose.yml (dev):
+#  - limites de memória por serviço (OOM mata o container certo, não a VM);
+#  - Postgres tunado para memória baixa;
+#  - nenhum serviço exposto publicamente exceto via Caddy (80/443);
+#  - restart: unless-stopped para sobreviver a reboot da VM;
+#  - healthcheck do postgres confiável antes do startup da API.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: natacao
+      POSTGRES_USER: natacao
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina em .env}
+      # Tuning para ~2 GB de RAM compartilhada com app e web
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=20
+      - -c
+      - random_page_cost=1.1
+    ports:
+      - "127.0.0.1:5432:5432" # somente localhost (túnel SSH para debug); nunca 0.0.0.0
+    volumes:
+      - natacao_pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U natacao -d natacao"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    mem_limit: 400m
+    memswap_limit: 600m
+    restart: unless-stopped
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/api.Dockerfile
+    environment:
+      API_PORT: "4000"
+      DATABASE_URL: postgres://natacao:${POSTGRES_PASSWORD}@postgres:5432/natacao
+      PERSISTENCE_REQUIRED: "true"
+      NODE_ENV: production
+      # CORS/cookie SameSite apontam para o domínio público (HTTPS)
+      CORS_ORIGINS: ${CORS_ORIGINS:?defina em .env}
+      STORAGE_PATH: /data/storage
+    expose:
+      - "4000" # apenas na rede interna do compose; Caddy publica
+    volumes:
+      - natacao_api_storage:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 900m # FFmpeg precisa de margem; swap cobre picos
+    memswap_limit: 1500m
+    restart: unless-stopped
+    logging: *logging
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/web.Dockerfile
+      args:
+        # Bake do build Next.js: API pública única atrás do Caddy
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:?defina em .env}
+    environment:
+      NODE_ENV: production
+    expose:
+      - "3000"
+    depends_on:
+      - api
+    mem_limit: 400m
+    memswap_limit: 600m
+    restart: unless-stopped
+    logging: *logging
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - natacao_caddy_data:/data
+      - natacao_caddy_config:/config
+    depends_on:
+      - api
+      - web
+    mem_limit: 150m
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  natacao_pgdata:
+  natacao_api_storage:
+  natacao_caddy_data:
+  natacao_caddy_config:

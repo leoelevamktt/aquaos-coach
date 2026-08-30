@@ -1,0 +1,15 @@
+﻿skill_code,skill_name,category,technical_sequence
+START_FRONT,Saída de bloco,Saídas,posição→reação→impulsão→voo→entrada→streamline→submerso→breakout
+START_BACK,Saída de costas,Saídas,posição→tração→projeção→entrada→streamline→submerso→breakout
+TURN_FREE,Virada de crawl,Viradas,aproximação→última braçada→rotação→pés→impulsão→streamline→submerso→breakout
+TURN_OPEN,Virada aberta peito/borboleta,Viradas,toque simultâneo→rotação→pés→impulsão→saída específica
+TURN_BACK,Virada de costas,Viradas,contagem→rotação ventral→cambalhota→impulsão→submerso→breakout
+STREAMLINE,Streamline,Habilidade aquática,alinhamento hidrodinâmico
+UNDERWATER,Submerso,Habilidade aquática,preservar velocidade submersa
+BREAKOUT,Breakout,Habilidade aquática,transição submerso-superfície
+SCULL,Scull,Sensibilidade,pressão mão/antebraço
+STROKE_CONTROL,Controle de braçadas,Eficiência,"distância por ciclo, ritmo e velocidade"
+BREATH,Respiração,Coordenação,respirar sem deformar o nado
+KICK,Perna,Propulsão,"técnica, resistência e potência"
+COORD,Coordenação,Técnica,integração braço-perna-tronco
+PROPRIO,Propriocepção,Habilidade aquática,"eixo, rotação e posição corporal"
