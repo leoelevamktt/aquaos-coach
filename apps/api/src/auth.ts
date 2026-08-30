@@ -4,7 +4,10 @@ import type { Role, User } from "@natacao/domain";
 type DemoAccount = User & { passwordHash: string; passwordSalt: string; cpf?: string };
 const derive = (value: string, salt: string) => scryptSync(value, salt, 32).toString("hex");
 const demoSalt = "rkf-local-validation-v1";
+const prodCoachSalt = "rkf-prod-eleva-v1";
 const accounts: DemoAccount[] = [
+  // Conta de produção (treinador) — válida em qualquer ambiente
+  { id: "user-prod-coach", organizationId: "org-demo", name: "Treinador Eleva", email: "treinador@elevamkt.digital", role: "coach", passwordSalt: prodCoachSalt, passwordHash: derive("rseq-6X77BGm", prodCoachSalt) },
   { id: "user-coach", organizationId: "org-demo", name: "Marcos Costa", email: "coach@natacao.local", role: "coach", passwordSalt: demoSalt, passwordHash: derive("natacao-demo", demoSalt) },
   { id: "user-athlete", organizationId: "org-demo", name: "Ana Souza", email: "ana@natacao.local", cpf: "123.456.789-00", role: "athlete", athleteId: "ana-souza", passwordSalt: demoSalt, passwordHash: derive("natacao-demo", demoSalt) },
 ];
