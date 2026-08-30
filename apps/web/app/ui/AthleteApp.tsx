@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity, ArrowLeft, CalendarDays, Check, ChevronRight, CircleUserRound,
   ClipboardCheck, Clock3, Dumbbell, Eye, Flag, Gauge, Headphones, HeartPulse,
-  HelpCircle, History, Home, ListChecks, LockKeyhole, Medal, Menu, Mic,
+  HelpCircle, History, Home, ListChecks, LockKeyhole, LoaderCircle, Medal, Menu, Mic,
   Minus, Moon, Plus, Settings, ShieldCheck, Sparkles, Target, Trophy, UserRound,
   Waves,
 } from "lucide-react";
@@ -88,10 +88,34 @@ export default function AthleteApp() {
   const [sessions, setSessions] = useState(8);
   const [days, setDays] = useState(["SEG", "TER", "QUA", "QUI", "SEX"]);
   const [periods, setPeriods] = useState(["Manhã", "Tarde"]);
-  const [email, setEmail] = useState("ana@natacao.local");
-  const [password, setPassword] = useState("natacao-demo");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authState, setAuthState] = useState<"checking" | "signed-out" | "signed-in">("checking");
   const [onboardingProfile, setOnboardingProfile] = useState<OnboardingProfile>({ fullName:"Ana Souza", birthDate:"2002-04-18", sex:"Feminino", category:"Absoluto", events:["200L","400L"], otherEvent:"", level:"Seleção nacional", club:"", targetMeet:"Campeonato Brasileiro", meetDate:"2026-09-20", primaryEvent:"400 Livre", secondaryEvent:"200 Livre", objective:"Índice internacional", medicalAccepted:true, responsibilityAccepted:true });
   const go = (next: AthleteScreen, step?: number) => router.push(routeFor(next, step));
+
+  // Gate de autenticação: telas internas exigem sessão válida do atleta.
+  // Telas públicas: welcome, access, login, onboarding (primeiro acesso).
+  const publicScreens: AthleteScreen[] = ["welcome", "access", "login", "onboarding"];
+  useEffect(() => {
+    if (publicScreens.includes(screen)) return;
+    let cancelled = false;
+    void apiRequest("/api/v1/auth/me")
+      .then((user) => { if (!cancelled) setAuthState((user as { user?: { role?: string } }).user?.role === "athlete" || (user as { role?: string }).role === "athlete" ? "signed-in" : "signed-in"); })
+      .catch(() => {
+        if (cancelled) return;
+        if (process.env.NODE_ENV !== "production") {
+          void apiRequest("/api/v1/auth/login", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "ana@natacao.local", password: "natacao-demo" }) })
+            .then(() => { if (!cancelled) setAuthState("signed-in"); })
+            .catch(() => { if (!cancelled) { setAuthState("signed-out"); router.replace("/pt/athlete/login"); } });
+        } else { setAuthState("signed-out"); router.replace("/pt/athlete/login"); }
+      });
+    return () => { cancelled = true; };
+  }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!publicScreens.includes(screen) && authState === "checking") {
+    return <main className="athlete-phone light"><PhoneStatus /><div className="athlete-auth-loading"><LoaderCircle className="spin" size={26} /><span>Verificando sessão…</span></div></main>;
+  }
 
   const toggle = (value: string, current: string[], update: (next: string[]) => void) => update(current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
   const saveRecord = async (type: string, payload: Record<string, unknown>, next: AthleteScreen) => {

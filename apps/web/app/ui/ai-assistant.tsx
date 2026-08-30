@@ -15,10 +15,41 @@ const SUGGESTIONS = [
   "Como está o volume da equipe?",
 ];
 
+/** Estágios exibidos enquanto o assistente processa — dão noção de progresso. */
+const THINKING_STAGES = [
+  "Consultando os dados da plataforma…",
+  "Analisando atletas, treinos e metas…",
+  "Cruzando prontidão, volume e carga…",
+  "Redigindo a resposta…",
+];
+
+/** Sanitiza a resposta do modelo: remove cabeçalhos ##, artefatos de markdown residual e espaços duplos. */
+function sanitizeLine(line: string): string {
+  return line
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/\*\*([^*]+)\*\*/g, "**$1**")
+    .replace(/[*_]{2,}/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function renderContent(content: string) {
-  // Markdown leve: **negrito**, listas com "- " e quebras de linha
-  const blocks = content.split("\n").filter((line) => line.trim().length > 0);
-  return blocks.map((line, index) => {
+  // Markdown leve higienizado: **negrito**, listas "- "/"• ", quebras de linha.
+  const blocks = content
+    .split("\n")
+    .map((line) => sanitizeLine(line))
+    .filter((line) => line.length > 0);
+  const elements: React.ReactNode[] = [];
+  let bulletGroup: React.ReactNode[] = [];
+
+  const flushBullets = (key: string) => {
+    if (bulletGroup.length) {
+      elements.push(<ul key={`ul-${key}`} className="chat-bullet-group">{bulletGroup}</ul>);
+      bulletGroup = [];
+    }
+  };
+
+  blocks.forEach((line, index) => {
     const isBullet = /^[-•*]\s+/.test(line);
     const text = line.replace(/^[-•*]\s+/, "");
     const parts = text.split(/(\*\*[^*]+\*\*)/g).map((part, partIndex) =>
@@ -26,10 +57,38 @@ function renderContent(content: string) {
         ? <strong key={partIndex}>{part.slice(2, -2)}</strong>
         : <span key={partIndex}>{part}</span>
     );
-    return isBullet
-      ? <li key={index} className="chat-bullet">{parts}</li>
-      : <p key={index}>{parts}</p>;
+    if (isBullet) {
+      bulletGroup.push(<li key={index} className="chat-bullet">{parts}</li>);
+    } else {
+      flushBullets(String(index));
+      elements.push(<p key={index}>{parts}</p>);
+    }
   });
+  flushBullets("end");
+  return elements;
+}
+
+function ThinkingIndicator() {
+  const [stage, setStage] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setStage((current) => Math.min(current + 1, THINKING_STAGES.length - 1));
+    }, 2600);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <div className="ai-msg-content ai-thinking">
+      <div className="ai-thinking-stage">
+        <span className="ai-typing"><i /><i /><i /></span>
+        <span className="ai-thinking-label">{THINKING_STAGES[stage]}</span>
+      </div>
+      <div className="ai-thinking-progress">
+        {THINKING_STAGES.map((label, index) => (
+          <i key={label} className={index <= stage ? "done" : ""} />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function AiAssistant() {
@@ -117,7 +176,7 @@ export function AiAssistant() {
           {loading && (
             <div className="ai-msg assistant">
               <span className="ai-msg-avatar"><Bot size={14} /></span>
-              <div className="ai-msg-content ai-typing"><i /><i /><i /></div>
+              <ThinkingIndicator />
             </div>
           )}
         </div>
