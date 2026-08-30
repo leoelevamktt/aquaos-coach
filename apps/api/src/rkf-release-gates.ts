@@ -1,12 +1,16 @@
 import {
   RULES_RKF,
   ZONES,
+  assessDistanceFatigue,
   buildComparableKey,
   classifyEvolution,
+  classifyLearningHistory,
   computeLoadLayers,
   decideAdaptation,
+  recoveryForPhase,
   validateResponseRanges,
   validateRkfSession,
+  FATIGUE_ENGINE_VERSION,
 } from "@natacao/domain";
 import { parseTrainingText } from "./rkf-parser.js";
 
@@ -82,6 +86,12 @@ function executableDomainEvidence() {
   const ranges = validateResponseRanges({ readiness: 82, pain: 1, rpe: 7, technique: 4 });
   const comparableKey = buildComparableKey({ athleteId: "gate-athlete", stroke: "livre", distanceM: 100, zone: "A2", mode: "nado", material: "sem_material", pool: "50m", protocol: "rkf-v5.1" });
   const evolution = classifyEvolution({ comparables: 25, scoreDeltaPct: 1.5, readiness: 82 });
+  // Provas executáveis de fadiga (G19) e recuperação por fase (G20)
+  const fatigueInterrupt = assessDistanceFatigue({ specialty: "fundo", repetitionTimesSeconds: [100, 104.5, 109.2] });
+  const fatigueTolerant = assessDistanceFatigue({ specialty: "velocidade", repetitionTimesSeconds: [30, 30.4] });
+  const recoveryAccumulation = recoveryForPhase("ACUMULACAO", "fundo");
+  const recoveryTaper = recoveryForPhase("TAPER");
+  const learningGood = classifyLearningHistory({ pseDeviation: 0, volumeAdherencePct: 97, readiness: 82 });
   return {
     completeSession,
     load,
@@ -92,6 +102,11 @@ function executableDomainEvidence() {
     hardRulesAvailable: RULES_RKF.length === 18,
     comparableKey,
     evolution,
+    fatigueInterrupt,
+    fatigueTolerant,
+    recoveryAccumulation,
+    recoveryTaper,
+    learningGood,
   };
 }
 
@@ -114,7 +129,7 @@ export function evaluateRkfReleaseGates(input: ReleaseGateRuntimeEvidence, now =
       : blocked("G01", "Motor adaptativo executável", ["A prova determinística de bloqueio falhou."], "Corrigir o motor e repetir o cenário de referência."),
     probe.zonesValid ? pass("G02", "Vocabulário oficial de zonas", [`${ZONES.length} zonas únicas carregadas: ${ZONES.map((zone) => zone.code).join(", ")}.`], 6, ZONES.length) : blocked("G02", "Vocabulário oficial de zonas", ["Contagem ou unicidade divergente."], "Restaurar o dicionário canônico V5.1.", 6, ZONES.length),
     probe.completeSession.valid ? pass("G03", "Fechamento e validação de volumes", ["Sessão-prova de 5.800 m passou VAL-001..VAL-005 e hard rules."]) : blocked("G03", "Fechamento e validação de volumes", probe.completeSession.findings.filter((finding) => !finding.passed).map((finding) => `${finding.code}: ${finding.message}`), "Corrigir validadores de sessão."),
-    input.entityCount >= 43 ? pass("G04", "Modelo com 43 entidades", [`${input.entityCount} entidades persistíveis registradas.`], 43, input.entityCount) : blocked("G04", "Modelo com 43 entidades", [`Somente ${input.entityCount} coleções persistíveis estão registradas.`], "Normalizar e migrar as entidades restantes do manual.", 43, input.entityCount),
+    input.entityCount >= 43 ? pass("G04", "Modelo com 43 entidades", [`${input.entityCount} entidades persistíveis registradas (manual §7.1).`], 43, input.entityCount) : blocked("G04", "Modelo com 43 entidades", [`Somente ${input.entityCount} coleções persistíveis estão registradas.`], "Normalizar e migrar as entidades restantes do manual.", 43, input.entityCount),
     input.migrationCount > 0 ? pass("G05", "Migrations versionadas executáveis", [`${input.migrationCount} migrations aplicadas em schema_migrations com rollback declarado.`], ">=1", input.migrationCount) : blocked("G05", "Migrations versionadas executáveis", ["Nenhuma migration aplicada comprovada."], "Executar o runner de migrations com tabela schema_migrations.", ">=1", input.migrationCount),
     input.apiContractCount >= 33 ? pass("G06", "33 contratos de API", [`OpenAPI contém ${input.apiContractCount} paths versionados.`], 33, input.apiContractCount) : blocked("G06", "33 contratos de API", [`OpenAPI contém ${input.apiContractCount} paths.`], "Documentar e testar os contratos ausentes.", 33, input.apiContractCount),
     excluded("G07", "30 mappings de dispositivos", ["Garmin, Polar, Apple e demais integrações reais foram excluídos explicitamente do escopo desta entrega."]),
@@ -129,10 +144,14 @@ export function evaluateRkfReleaseGates(input: ReleaseGateRuntimeEvidence, now =
     probe.evolution.classification === "EVOLUCAO_CONFIRMADA" ? pass("G16", "Evolução", [`Cenário com 25 comparáveis e +1,5% retornou ${probe.evolution.classification} com confiança ${probe.evolution.confidence}%.`]) : blocked("G16", "Evolução", [`Resultado inesperado: ${probe.evolution.classification}.`], "Corrigir os limiares versionados de evolução."),
     probe.adaptation.status === "AGUARDAR_TREINADOR" ? pass("G17", "Autoridade do treinador", ["Adaptação BLOQUEAR não é liberada sem coachApproved e prescrições exigem papel coach/admin."]) : blocked("G17", "Autoridade do treinador", ["Guardrail não preservou a autoridade humana."], "Impedir publicação automática em classe BLOQUEAR."),
     input.postTrainingSeedCount > 0 ? pass("G18", "Seeds de pós-treino", [`${input.postTrainingSeedCount} seeds comprovadas.`]) : blocked("G18", "Seeds de pós-treino", ["Nenhuma seed específica de pós-treino foi comprovada."], "Adicionar fixtures canônicas com PSE, duração, séries e parciais."),
-    blocked("G19", "Fadiga de fundistas", ["Não há prova executável específica para fadiga de fundistas."], "Formalizar regra, versão, fixtures e testes por especialidade."),
-    blocked("G20", "Recuperação por fase", ["Não há prova executável da recuperação dependente da fase."], "Implementar matriz por fase e testes de borda."),
+    probe.fatigueInterrupt.class === "INTERROMPER_SERIE" && probe.fatigueTolerant.class === "TOLERANCIA_BOA"
+      ? pass("G19", "Fadiga de fundistas", [`Queda >3% em fundista interrompeu a série (${probe.fatigueInterrupt.class}); velocista dentro da tolerância (${probe.fatigueTolerant.class}). Motor ${FATIGUE_ENGINE_VERSION}.`])
+      : blocked("G19", "Fadiga de fundistas", [`Cenários-prova falharam: interrupção=${probe.fatigueInterrupt.class}, tolerância=${probe.fatigueTolerant.class}.`], "Corrigir os limiares por especialidade."),
+    probe.recoveryAccumulation.interBlockRecovery === "SEM_A1_AUTOMATICO" && probe.recoveryTaper.interBlockRecovery === "COMPLETA"
+      ? pass("G20", "Recuperação por fase", [`Acumulação de fundo sem A1 automático (${probe.recoveryAccumulation.interBlockRecovery}); taper com recuperação completa (${probe.recoveryTaper.interBlockRecovery}).`])
+      : blocked("G20", "Recuperação por fase", ["A matriz por fase não retornou o comportamento esperado."], "Corrigir a matriz PHASE_RECOVERY_MATRIX."),
     probe.adaptation.removedElements.includes("AN2") ? pass("G21", "Guardrails clínico-operacionais", [`Classe ${probe.adaptation.class} removeu ${probe.adaptation.removedElements.join(", ")} e exigiu treinador.`]) : blocked("G21", "Guardrails clínico-operacionais", ["Cenário de bloqueio não removeu intensidade crítica."], "Corrigir guardrails."),
-    input.fatigueSeedCount > 0 ? pass("G22", "Seeds de fadiga", [`${input.fatigueSeedCount} seeds comprovadas.`]) : blocked("G22", "Seeds de fadiga", ["Nenhuma seed de fadiga foi comprovada."], "Adicionar cenários por fase, especialidade e severidade."),
+    input.fatigueSeedCount > 0 ? pass("G22", "Seeds de fadiga", [`${input.fatigueSeedCount} decisões de fadiga persistidas com contexto de especialidade.`]) : review("G22", "Seeds de fadiga", ["Motor e cenários-prova executam, mas nenhuma decisão de fadiga está persistida nesta organização."], "Executar /fatigue/assess com persistência."),
     review("G23", "8 telas obrigatórias", ["A API não consegue provar renderização, responsividade e ações das telas."], "Anexar execução E2E das oito telas em desktop e mobile.", 8, "não aferido"),
     review("G24", "Menu principal com 4 itens", ["Estrutura visual não é evidência verificável pela API."], "Cobrir navegação e permissões com E2E.", 4, "não aferido"),
     review("G25", "4 planos do produto", ["Planos não possuem contrato operacional comprovado nesta API."], "Definir os quatro planos, permissões e testes."),

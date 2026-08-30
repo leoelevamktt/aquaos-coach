@@ -3,7 +3,17 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PostgresPersistence, type PersistenceHealth, type RkfSeedImport } from "./postgres-persistence.js";
 
-export const resourceKinds = ["athletes", "groups", "workouts", "seasons", "meets", "videos", "documents", "staff", "zones", "goals", "activities", "ingestions", "prescriptions", "results", "loadSnapshots", "adaptationDecisions", "governance", "settings", "users", "authSessions"] as const;
+export const resourceKinds = [
+  "athletes", "groups", "workouts", "seasons", "meets", "videos", "documents", "staff", "zones", "goals",
+  "activities", "ingestions", "prescriptions", "results", "loadSnapshots", "adaptationDecisions", "governance", "settings", "users", "authSessions",
+  // Entidades normalizadas do manual §7.1 (persistíveis; seeds vazias até migração de dados)
+  "teams", "athleteProfiles", "athleteCalibrations", "trainingZones", "macrocycles", "mesocycles", "microcycles",
+  "trainingSessions", "sessionBlocks", "sessionPrescriptions", "prescriptionBlocks", "sessionExecutions",
+  "athleteResponses", "deviceSamples", "readinessScores", "syncJobs", "auditEvents", "sessionContextSnapshots",
+  "performanceBenchmarks", "evolutionAssessments", "distanceFatigueRules", "trainingSourceAssets",
+  "trainingExtractions", "trainingReviewItems", "importedTrainingSessions", "importedTrainingBlocks",
+  "athleteSessionAssignments", "loadCalculations",
+] as const;
 export type ResourceKind = typeof resourceKinds[number];
 
 export type ManagedRecord = {
@@ -83,6 +93,35 @@ function seed(): DatabaseShape {
         { id: "rkf-v5-1", name: "Homologação RKF V5.1", status: "validation", seedExpectedSessions: 910, seedExpectedBlocks: 6226, seedImported: false, decisionRegisterOpen: true },
       ]),
       settings: records([{ id: "program", name: "Configuração do programa", organizationName: "Seleção Nacional de Natação", locale: "pt-BR", measurementSystem: "metric", primaryPool: "50 m", loadEngine: "RkfLoadEngine", rkfVersion: "RKF_V5.1", rkfStatus: "validation", status: "active" }]),
+      // Entidades normalizadas do manual §7.1: persistíveis, seeds vazias
+      teams: records([]),
+      athleteProfiles: records([]),
+      athleteCalibrations: records([]),
+      trainingZones: records([]),
+      macrocycles: records([]),
+      mesocycles: records([]),
+      microcycles: records([]),
+      trainingSessions: records([]),
+      sessionBlocks: records([]),
+      sessionPrescriptions: records([]),
+      prescriptionBlocks: records([]),
+      sessionExecutions: records([]),
+      athleteResponses: records([]),
+      deviceSamples: records([]),
+      readinessScores: records([]),
+      syncJobs: records([]),
+      auditEvents: records([]),
+      sessionContextSnapshots: records([]),
+      performanceBenchmarks: records([]),
+      evolutionAssessments: records([]),
+      distanceFatigueRules: records([]),
+      trainingSourceAssets: records([]),
+      trainingExtractions: records([]),
+      trainingReviewItems: records([]),
+      importedTrainingSessions: records([]),
+      importedTrainingBlocks: records([]),
+      athleteSessionAssignments: records([]),
+      loadCalculations: records([]),
     },
     audit: [],
   };

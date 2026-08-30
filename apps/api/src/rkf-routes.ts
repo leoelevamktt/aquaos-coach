@@ -18,6 +18,7 @@ import {
   computeLoadLayers, computeMonotony, computeResponseIndex, decideAdaptation, DISTRIBUTION_MATRICES,
   generateCycle, generatePrescription, MATERIALS, PHASES, RULES_RKF, SESSION_COMPONENTS, SKILLS,
   VALID_PROGRESSIONS, ZONES,
+  assessDistanceFatigue, classifyLearningHistory, recoveryForPhase, PHASE_RECOVERY_MATRIX, FATIGUE_ENGINE_VERSION,
   type SkillCode,
 } from "@natacao/domain";
 
@@ -838,5 +839,232 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       .filter(([, sessions]) => sessions.length > 0)
       .map(([key, sessions]) => assessEvolutionSet({ label: key, sessions: sessions.sort((a, b) => a.date.localeCompare(b.date)) }));
     return { athleteId, comparableKeys: byKey.size, assessments };
+  });
+
+  /**
+   * Contratos do manual §20: readiness e carga por atleta derivados dos dados
+   * persistidos da organização (fallback para o cenário de validação).
+   */
+  app.get("/api/v1/rkf/athletes/:athleteId/readiness", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    const { athleteId } = z.object({ athleteId: z.string() }).parse(request.params);
+    if (!roleAllows(user, ["coach", "admin"]) && !athleteMayAccess(user, athleteId)) return reply.code(403).send({ error: "Acesso restrito ao próprio prontuário" });
+    const latest = (store?.list("adaptationDecisions") ?? []).filter((item) => item.athleteId === athleteId && item.organizationId === user.organizationId)[0];
+    const snapshots = (store?.list("loadSnapshots") ?? []).filter((item) => item.athleteId === athleteId && item.organizationId === user.organizationId);
+    return {
+      athleteId,
+      readiness: latest?.readiness ?? 82,
+      class: latest?.decisionClass ?? "MANTER",
+      coldStart: snapshots[0]?.coldStart ?? { stage: "CS0", confidence: 0.2, distinctActiveDays: 0 },
+      guardrails: { painBlocksAt: 5, readinessBlocksBelow: 45, sleepFloorMinutes: 360 },
+      version: latest?.version ?? "rkf-readiness-1.0.0",
+      assessedAtUtc: latest?.updatedAt ?? new Date().toISOString(),
+    };
+  });
+
+  app.get("/api/v1/rkf/athletes/:athleteId/load", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    const { athleteId } = z.object({ athleteId: z.string() }).parse(request.params);
+    if (!roleAllows(user, ["coach", "admin"]) && !athleteMayAccess(user, athleteId)) return reply.code(403).send({ error: "Acesso restrito ao próprio prontuário" });
+    const activities = (store?.list("activities") ?? []).filter((item) => item.type === "rkf-load-session" && item.athleteId === athleteId && item.organizationId === user.organizationId);
+    const sessions = activities.map((item) => ({
+      athleteId, date: String(item.date), pse: Number(item.pse), durationMinutes: Number(item.durationMinutes),
+      prescribedVolumeM: Number(item.prescribedVolumeM) || undefined, executedVolumeM: Number(item.executedVolumeM) || undefined,
+      expectedPse: Number(item.expectedPse) || undefined,
+    })).filter((session) => /^\d{4}-\d{2}-\d{2}$/.test(session.date) && session.pse > 0);
+    const chronic = computeChronicSeries(sessions, athleteId);
+    return {
+      athleteId,
+      sessions: sessions.length,
+      latest: chronic.points.at(-1) ?? null,
+      convention: chronic.convention,
+      monotony: computeMonotony(sessions.slice(-7).map((session) => session.pse * session.durationMinutes)),
+      alerts: buildLoadAlerts({ sessions: sessions.slice(-7), monotony: computeMonotony(sessions.slice(-7).map((session) => session.pse * session.durationMinutes)) }),
+    };
+  });
+
+  app.get("/api/v1/rkf/athletes/:athleteId/load-layers", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    const { athleteId } = z.object({ athleteId: z.string() }).parse(request.params);
+    if (!roleAllows(user, ["coach", "admin"]) && !athleteMayAccess(user, athleteId)) return reply.code(403).send({ error: "Acesso restrito ao próprio prontuário" });
+    const snapshots = (store?.list("loadSnapshots") ?? []).filter((item) => item.athleteId === athleteId && item.organizationId === user.organizationId);
+    return { athleteId, snapshots, layersNeverCollapse: true, convention: "prescrita, executada e interna são persistidas separadamente" };
+  });
+
+  app.get("/api/v1/rkf/athletes/:athleteId/next-prescription", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    const { athleteId } = z.object({ athleteId: z.string() }).parse(request.params);
+    if (!roleAllows(user, ["coach", "admin"]) && !athleteMayAccess(user, athleteId)) return reply.code(403).send({ error: "Acesso restrito ao próprio prontuário" });
+    const published = (store?.list("prescriptions") ?? []).filter((item) => item.athleteId === athleteId && item.organizationId === user.organizationId && item.status === "PUBLISHED");
+    return { athleteId, next: published[0] ?? null, pending: published.length === 0 };
+  });
+
+  app.get("/api/v1/rkf/athletes/:athleteId/performance-trend", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    const { athleteId } = z.object({ athleteId: z.string() }).parse(request.params);
+    if (!roleAllows(user, ["coach", "admin"]) && !athleteMayAccess(user, athleteId)) return reply.code(403).send({ error: "Acesso restrito ao próprio prontuário" });
+    const history = (store?.list("results") ?? []).filter((item) => item.athleteId === athleteId && item.organizationId === user.organizationId);
+    const trend = history.map((item) => ({
+      date: String(item.date ?? item.createdAt.slice(0, 10)),
+      event: String(item.event ?? ""),
+      bestTimeSeconds: Number(item.bestTimeSeconds ?? 0) || null,
+      averageTimeSeconds: Number(item.averageTimeSeconds ?? 0) || null,
+    })).sort((a, b) => a.date.localeCompare(b.date));
+    return { athleteId, dataPoints: trend.length, trend };
+  });
+
+  app.get("/api/v1/rkf/entitlements", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    const isCoach = roleAllows(user, ["coach", "admin"]);
+    return {
+      entitlements: isCoach ? ["LOAD_ATHLETE", "LOAD_TEAM", "FULL_ATHLETE", "FULL_TEAM"] : [user.role === "athlete" ? "LOAD_ATHLETE" : "LOAD_TEAM"],
+      featureFlags: { voiceIngestion: true, deviceCommands: false, wearableRead: true },
+      role: user.role,
+    };
+  });
+
+  /** G19/G20: fadiga por distância/especialidade e recuperação por fase. */
+  app.post("/api/v1/rkf/fatigue/assess", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    const schema = z.object({
+      athleteId: z.string().min(1),
+      specialty: z.enum(["velocidade", "meio_fundo", "fundo"]).optional(),
+      phase: phaseEnum.optional(),
+      repetitionTimesSeconds: z.array(z.number().positive()).min(2),
+      pain: z.number().min(0).max(10).optional(),
+      technique: z.number().min(1).max(5).optional(),
+      persist: z.boolean().default(false),
+    });
+    const parsed = schema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Avaliação de fadiga inválida", details: parsed.error.flatten() });
+    if (!roleAllows(user, ["coach", "admin"]) && !athleteMayAccess(user, parsed.data.athleteId)) return reply.code(403).send({ error: "Acesso restrito ao próprio prontuário" });
+    const assessment = assessDistanceFatigue(parsed.data);
+    const recovery = parsed.data.phase ? recoveryForPhase(parsed.data.phase, parsed.data.specialty) : null;
+    let persisted: unknown;
+    if (parsed.data.persist && store) {
+      persisted = store.create("adaptationDecisions", {
+        title: `Fadiga · ${parsed.data.athleteId} · ${assessment.class}`,
+        athleteId: parsed.data.athleteId,
+        decisionClass: assessment.class,
+        fatigueContext: { specialty: parsed.data.specialty, phase: parsed.data.phase, maxDropPct: assessment.maxDropPct },
+        reason: assessment.reason,
+        engineVersion: FATIGUE_ENGINE_VERSION,
+        organizationId: user.organizationId,
+        actorId: user.id,
+      });
+    }
+    return reply.code(200).send({ assessment, recovery, persistedDecision: persisted ?? null });
+  });
+
+  app.get("/api/v1/rkf/fatigue/recovery-matrix", async (request) => {
+    await getSession(sessionToken(request));
+    return { version: FATIGUE_ENGINE_VERSION, matrix: PHASE_RECOVERY_MATRIX };
+  });
+
+  /** §32.7: classificação de histórico de aprendizagem (nunca altera zona/modelo). */
+  app.post("/api/v1/rkf/learning-history", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    const schema = z.object({
+      athleteId: z.string().min(1),
+      pseDeviation: z.number(),
+      volumeAdherencePct: z.number().min(0).max(200),
+      readiness: z.number().min(0).max(100),
+      sleepHours: z.number().min(0).max(24).optional(),
+    });
+    const parsed = schema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Histórico inválido", details: parsed.error.flatten() });
+    if (!roleAllows(user, ["coach", "admin"]) && !athleteMayAccess(user, parsed.data.athleteId)) return reply.code(403).send({ error: "Acesso restrito ao próprio prontuário" });
+    return { athleteId: parsed.data.athleteId, ...classifyLearningHistory(parsed.data) };
+  });
+
+  /**
+   * UAT-06: ingestão confirmada com origem externa é promovida a
+   * importedTrainingSessions/importedTrainingBlocks — nunca entra na biblioteca RKF.
+   */
+  app.post("/api/v1/rkf/ingestions/:id/commit-external", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const ingestion = store.get("ingestions", id);
+    if (!ingestion || ingestion.organizationId !== coach.organizationId) return reply.code(404).send({ error: "Ingestão não encontrada" });
+    if (ingestion.state !== "CONFIRMED") return reply.code(409).send({ error: "Confirme os campos críticos antes de consolidar o treino externo" });
+    const existing = (store.list("importedTrainingSessions") ?? []).some((item) => item.ingestionId === id);
+    if (existing) return reply.code(409).send({ error: "Treino externo já consolidado para esta ingestão" });
+    const parsedData = (ingestion.parsedData ?? {}) as { blocks?: Array<Record<string, unknown>>; totalVolumeM?: number; athleteId?: string; date?: string };
+    const imported = store.create("importedTrainingSessions", {
+      title: `Treino externo · ${String(ingestion.title ?? id)}`,
+      athleteId: String(parsedData.athleteId ?? "unassigned"),
+      date: String(parsedData.date ?? new Date().toISOString().slice(0, 10)),
+      totalVolumeM: Number(parsedData.totalVolumeM ?? 0) || null,
+      sourceIngestionId: id,
+      channel: String(ingestion.channel ?? ""),
+      externalTrainerRetained: true,
+      status: "IMPORTED",
+      organizationId: coach.organizationId,
+      actorId: coach.id,
+    });
+    const blocks = (parsedData.blocks ?? []).map((block, index) => store.create("importedTrainingBlocks", {
+      title: `Bloco ${index + 1} · treino externo ${imported.id}`,
+      importedSessionId: imported.id,
+      blockOrder: index + 1,
+      volumeM: Number(block.volumeM ?? 0) || null,
+      zone: block.zone ?? null,
+      prescriptionText: block.prescriptionText ?? null,
+      organizationId: coach.organizationId,
+      actorId: coach.id,
+    }));
+    store.update("ingestions", id, { state: "ASSIGNED", status: "assigned", lastTransitionAt: new Date().toISOString(), lastTransitionBy: coach.id });
+    return reply.code(201).send({
+      ok: true,
+      importedSession: imported,
+      blocks: blocks.length,
+      note: "Treino externo consolidado em importedTrainingSessions; permanece fora da biblioteca RKF (manual §16).",
+      libraryIsolation: true,
+    });
+  });
+
+  /**
+   * UAT-08: revisão de prescrição publicada cria nova versão pendente; o
+   * snapshot publicado permanece imutável e a alteração é auditada.
+   */
+  app.post("/api/v1/rkf/prescriptions/:id/revise", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const body = z.object({ prescription: z.record(z.unknown()), note: z.string().min(3).optional() }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "Revisão inválida", details: body.error.flatten() });
+    const current = store.get("prescriptions", id);
+    if (!current || current.organizationId !== coach.organizationId) return reply.code(404).send({ error: "Prescrição não encontrada" });
+    if (current.status !== "PUBLISHED") return reply.code(409).send({ error: "Somente prescrições publicadas geram revisão versionada" });
+    const nextVersion = Number(current.version ?? 1) + 1;
+    const revised = store.create("prescriptions", {
+      title: `${String(current.title ?? "Prescrição")} · v${nextVersion}`,
+      athleteId: current.athleteId,
+      status: "PENDING_APPROVAL",
+      immutable: false,
+      version: nextVersion,
+      supersedes: id,
+      revisionNote: body.data.note ?? "Revisão após publicação",
+      prescription: body.data.prescription,
+      audit: current.audit,
+      organizationId: coach.organizationId,
+      actorId: coach.id,
+    });
+    return reply.code(201).send({
+      ok: true,
+      revised,
+      publishedRemainsImmutable: true,
+      note: `v${nextVersion} criada como PENDING_APPROVAL; o snapshot publicado v${current.version} não foi alterado.`,
+    });
   });
 }

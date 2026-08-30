@@ -8,3 +8,4 @@ export * from "./readiness.js";
 export * from "./evolution.js";
 export * from "./validators.js";
 export * from "./planning-engine.js";
+export * from "./fatigue.js";
