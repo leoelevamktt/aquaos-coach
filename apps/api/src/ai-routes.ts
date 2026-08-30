@@ -187,12 +187,12 @@ REGRAS:
 
 async function callLLm(messages: Array<{ role: string; content: string }>): Promise<string> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45_000);
+  const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
     const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${LLM_API_KEY}` },
-      body: JSON.stringify({ model: LLM_MODEL, messages, max_tokens: 1200, temperature: 0.4, stream: false }),
+      body: JSON.stringify({ model: LLM_MODEL, messages, max_tokens: 1600, temperature: 0.4, stream: false }),
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`LLM respondeu ${response.status}`);
@@ -202,17 +202,23 @@ async function callLLm(messages: Array<{ role: string; content: string }>): Prom
     if (raw.startsWith("data:") || contentType.includes("text/event-stream")) {
       const chunks = raw.split("\n").filter((line) => line.startsWith("data:") && !line.includes("[DONE]"));
       let assembled = "";
+      let reasoning = "";
       for (const chunk of chunks) {
         try {
-          const parsed = JSON.parse(chunk.slice(5).trim()) as { choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }> };
+          const parsed = JSON.parse(chunk.slice(5).trim()) as { choices?: Array<{ delta?: { content?: string; reasoning_content?: string }; message?: { content?: string } }> };
           assembled += parsed.choices?.[0]?.delta?.content ?? parsed.choices?.[0]?.message?.content ?? "";
+          reasoning += parsed.choices?.[0]?.delta?.reasoning_content ?? "";
         } catch { /* linha keep-alive ignorada */ }
       }
       if (assembled.trim()) return assembled;
+      if (reasoning.trim()) return reasoning;
       throw new Error("Stream sem conteúdo");
     }
-    const payload = JSON.parse(raw) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = payload.choices?.[0]?.message?.content;
+    const payload = JSON.parse(raw) as { choices?: Array<{ message?: { content?: string; reasoning_content?: string } }> };
+    const message = payload.choices?.[0]?.message;
+    // Modelos com raciocínio podem devolver content vazio e a resposta em
+    // reasoning_content; usar o fallback antes de declarar falha.
+    const content = message?.content?.trim() || message?.reasoning_content?.trim();
     if (!content) throw new Error("Resposta vazia do modelo");
     return content;
   } finally {
