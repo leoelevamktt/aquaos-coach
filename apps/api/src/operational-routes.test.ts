@@ -13,7 +13,7 @@ const store = new ManagedStore(join(root, "store.json"));
 const app = Fastify({ logger: false });
 await app.register(multipart, { limits: { fileSize: 2 * 1024 * 1024, files: 1 } });
 registerOperationalRoutes(app, store);
-const cookie = `natacao_session=${login("coach@natacao.local", "natacao-demo")!.token}`;
+const cookie = `natacao_session=${(await login("coach@natacao.local", "natacao-demo"))!.token}`;
 
 function form(filename: string, mimeType: string, content: string | Buffer) {
   const boundary = `----rkf-${Date.now().toString(36)}`;

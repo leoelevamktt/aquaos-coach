@@ -22,18 +22,18 @@ const id = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.rand
 
 export function registerOperationalRoutes(app: FastifyInstance, store: ManagedStore) {
   const protectedKinds = ["ingestions", "prescriptions", "results", "loadSnapshots", "adaptationDecisions", "governance", "users", "authSessions"];
-  app.get("/api/v1/manage", async (request, reply) => { const user = getSession(sessionToken(request)); if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" }); return { resources: Object.fromEntries(resourceKinds.map((kind) => [kind, store.list(kind).filter((item) => item.organizationId === user!.organizationId).length])), kinds: resourceKinds, audit: store.audit(15) }; });
-  app.get("/api/v1/manage/audit", async (request, reply) => { const user = getSession(sessionToken(request)); if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" }); const query = z.object({ limit: z.coerce.number().min(1).max(500).default(100) }).parse(request.query); return { data: store.audit(500).filter((entry) => (entry.organizationId ?? "org-demo") === user!.organizationId).slice(0, query.limit) }; });
+  app.get("/api/v1/manage", async (request, reply) => { const user = await getSession(sessionToken(request)); if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" }); return { resources: Object.fromEntries(resourceKinds.map((kind) => [kind, store.list(kind).filter((item) => item.organizationId === user!.organizationId).length])), kinds: resourceKinds, audit: store.audit(15) }; });
+  app.get("/api/v1/manage/audit", async (request, reply) => { const user = await getSession(sessionToken(request)); if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" }); const query = z.object({ limit: z.coerce.number().min(1).max(500).default(100) }).parse(request.query); return { data: store.audit(500).filter((entry) => (entry.organizationId ?? "org-demo") === user!.organizationId).slice(0, query.limit) }; });
 
   app.get("/api/v1/manage/:kind", async (request, reply) => {
-    const user = getSession(sessionToken(request));
+    const user = await getSession(sessionToken(request));
     if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" });
     const parsed = kindSchema.safeParse((request.params as { kind?: string }).kind);
     if (!parsed.success) return reply.code(404).send({ error: "Módulo não encontrado" });
     return { data: store.list(parsed.data).filter((item) => item.organizationId === user!.organizationId) };
   });
   app.get("/api/v1/manage/:kind/:id", async (request, reply) => {
-    const user = getSession(sessionToken(request));
+    const user = await getSession(sessionToken(request));
     if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" });
     const params = z.object({ kind: kindSchema, id: z.string() }).safeParse(request.params);
     if (!params.success) return reply.code(404).send({ error: "Registro inválido" });
@@ -44,7 +44,7 @@ export function registerOperationalRoutes(app: FastifyInstance, store: ManagedSt
     const kind = kindSchema.safeParse((request.params as { kind?: string }).kind);
     const body = bodySchema.safeParse(request.body);
     if (!kind.success || !body.success) return reply.code(400).send({ error: "Dados inválidos" });
-    const user = getSession(sessionToken(request));
+    const user = await getSession(sessionToken(request));
     const athleteActivity = kind.data === "activities" && user?.role === "athlete";
     if (!roleAllows(user, ["coach", "admin"]) && !athleteActivity) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" });
     if (protectedKinds.includes(kind.data)) return reply.code(403).send({ error: "Use o fluxo RKF dedicado para preservar auditoria e imutabilidade" });
@@ -55,7 +55,7 @@ export function registerOperationalRoutes(app: FastifyInstance, store: ManagedSt
     const params = z.object({ kind: kindSchema, id: z.string() }).safeParse(request.params);
     const body = bodySchema.safeParse(request.body);
     if (!params.success || !body.success) return reply.code(400).send({ error: "Dados inválidos" });
-    const user = getSession(sessionToken(request));
+    const user = await getSession(sessionToken(request));
     const athleteSelfEdit = params.data.kind === "athletes" && user?.role === "athlete" && athleteMayAccess(user, params.data.id);
     if (!roleAllows(user, ["coach", "admin"]) && !athleteSelfEdit) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" });
     if (protectedKinds.includes(params.data.kind)) return reply.code(403).send({ error: "Registro RKF protegido contra alteração genérica" });
@@ -68,7 +68,7 @@ export function registerOperationalRoutes(app: FastifyInstance, store: ManagedSt
   app.delete("/api/v1/manage/:kind/:id", async (request, reply) => {
     const params = z.object({ kind: kindSchema, id: z.string() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "Registro inválido" });
-    const user = getSession(sessionToken(request));
+    const user = await getSession(sessionToken(request));
     if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" });
     if (protectedKinds.includes(params.data.kind)) return reply.code(403).send({ error: "Registro RKF protegido contra exclusão genérica" });
     const scopedRecord = store.get(params.data.kind, params.data.id);
@@ -87,7 +87,7 @@ export function registerOperationalRoutes(app: FastifyInstance, store: ManagedSt
   });
 
   app.post("/api/v1/uploads", async (request, reply) => {
-    const user = getSession(sessionToken(request));
+    const user = await getSession(sessionToken(request));
     if (!user) return reply.code(401).send({ error: "Autenticação necessária" });
     const query = z.object({ kind: kindSchema.default("documents"), athleteId: z.string().optional(), title: z.string().optional() }).safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: "Parâmetros do upload inválidos" });
@@ -140,7 +140,7 @@ export function registerOperationalRoutes(app: FastifyInstance, store: ManagedSt
   });
 
   app.post("/api/v1/import/:kind", async (request, reply) => {
-    const user = getSession(sessionToken(request));
+    const user = await getSession(sessionToken(request));
     if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" });
     const parsedKind = kindSchema.safeParse((request.params as { kind?: string }).kind);
     if (!parsedKind.success) return reply.code(400).send({ error: "Destino de importação inválido" });
@@ -190,7 +190,7 @@ export function registerOperationalRoutes(app: FastifyInstance, store: ManagedSt
   });
 
   app.post("/api/v1/videos/:id/analyze", async (request, reply) => {
-    const user = getSession(sessionToken(request));
+    const user = await getSession(sessionToken(request));
     if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" });
     const params = z.object({ id: z.string() }).parse(request.params);
     const record = store.get("videos", params.id);
@@ -207,7 +207,7 @@ export function registerOperationalRoutes(app: FastifyInstance, store: ManagedSt
   });
 
   app.post("/api/v1/videos/:id/events", async (request, reply) => {
-    const user = getSession(sessionToken(request));
+    const user = await getSession(sessionToken(request));
     if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" });
     const params = z.object({ id: z.string() }).parse(request.params);
     const body = z.object({ time: z.number().nonnegative(), category: z.string(), label: z.string().min(1), note: z.string().optional() }).safeParse(request.body);

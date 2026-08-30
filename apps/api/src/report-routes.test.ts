@@ -12,8 +12,8 @@ const app = Fastify({ logger: false });
 const store = new ManagedStore(join(root, "store.json"));
 store.create("activities", { athleteId: "ana-souza", title: "Sessão A2", date: "2026-08-30", executedVolumeM: 6000, pse: 7, zone: "A2", organizationId: "org-demo" });
 registerReportRoutes(app, store);
-const coachCookie = `natacao_session=${login("coach@natacao.local", "natacao-demo")!.token}`;
-const athleteCookie = `natacao_session=${login("ana@natacao.local", "natacao-demo")!.token}`;
+const coachCookie = `natacao_session=${(await login("coach@natacao.local", "natacao-demo"))!.token}`;
+const athleteCookie = `natacao_session=${(await login("ana@natacao.local", "natacao-demo"))!.token}`;
 beforeAll(async () => app.ready());
 afterAll(async () => { await app.close(); rmSync(root, { recursive: true, force: true }); });
 

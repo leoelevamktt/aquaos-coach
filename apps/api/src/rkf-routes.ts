@@ -45,15 +45,15 @@ function seedStagingStatus() {
   return { located: true, staged: errors.length === 0, status: errors.length ? "REVIEW" : "STAGING_READY", manifest, files, errors, packageHash: createHash("sha256").update(files.map((file) => `${file.name}:${file.sha256}`).join("|")).digest("hex") };
 }
 
-function requireCoach(request: FastifyRequest, reply: FastifyReply) {
-  const user = getSession(sessionToken(request));
+async function requireCoach(request: FastifyRequest, reply: FastifyReply) {
+  const user = await getSession(sessionToken(request));
   if (!user) { void reply.code(401).send({ error: "Autenticação necessária" }); return undefined; }
   if (!roleAllows(user, ["coach", "admin"])) { void reply.code(403).send({ error: "Ação exclusiva da comissão técnica" }); return undefined; }
   return user;
 }
 
-function requireAuthenticated(request: FastifyRequest, reply: FastifyReply) {
-  const user = getSession(sessionToken(request));
+async function requireAuthenticated(request: FastifyRequest, reply: FastifyReply) {
+  const user = await getSession(sessionToken(request));
   if (!user) { void reply.code(401).send({ error: "Autenticação necessária" }); return undefined; }
   return user;
 }
@@ -73,7 +73,7 @@ function validationSessions() {
 
 export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   app.get("/api/v1/rkf/bootstrap", async (request) => {
-    const viewer = getSession(sessionToken(request));
+    const viewer = await getSession(sessionToken(request));
     const staging = seedStagingStatus();
     const governance = store?.get("governance", "rkf-v5-1");
     const imported = Boolean(governance?.seedImported && governance.packageHash === ("packageHash" in staging ? staging.packageHash : undefined));
@@ -113,7 +113,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   app.get("/api/v1/rkf/seed/status", async () => seedStagingStatus());
 
   app.post("/api/v1/rkf/seed/stage", async (request, reply) => {
-    const coach = requireCoach(request, reply);
+    const coach = await requireCoach(request, reply);
     if (!coach) return;
     if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
     const staging = seedStagingStatus();
@@ -127,7 +127,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   });
 
   app.post("/api/v1/rkf/seed/import", async (request, reply) => {
-    const coach = requireCoach(request, reply);
+    const coach = await requireCoach(request, reply);
     if (!coach) return;
     if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
     const staging = seedStagingStatus();
@@ -161,7 +161,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   });
 
   app.get("/api/v1/rkf/results/athletes/:athleteId", async (request, reply) => {
-    const user = requireAuthenticated(request, reply);
+    const user = await requireAuthenticated(request, reply);
     if (!user) return;
     const { athleteId } = z.object({ athleteId: z.string() }).parse(request.params);
     const isOwn = athleteMayAccess(user, athleteId);
@@ -170,7 +170,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   });
 
   app.post("/api/v1/rkf/results/sessions", async (request, reply) => {
-    const user = requireAuthenticated(request, reply);
+    const user = await requireAuthenticated(request, reply);
     if (!user) return;
     if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
     const splitSchema = z.object({ distanceM: z.number().positive(), timeSeconds: z.number().positive() });
@@ -192,13 +192,13 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   });
 
   app.get("/api/v1/rkf/ingestions", async (request, reply) => {
-    const coach = requireCoach(request, reply);
+    const coach = await requireCoach(request, reply);
     if (!coach) return;
     return { data: (store?.list("ingestions") ?? []).filter((item) => item.organizationId === coach.organizationId) };
   });
 
   app.post("/api/v1/rkf/ingestions", async (request, reply) => {
-    const coach = requireCoach(request, reply);
+    const coach = await requireCoach(request, reply);
     if (!coach) return;
     if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
 
@@ -307,7 +307,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   });
 
   app.patch("/api/v1/rkf/ingestions/:id", async (request, reply) => {
-    const coach = requireCoach(request, reply);
+    const coach = await requireCoach(request, reply);
     if (!coach) return;
     if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
     const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -323,7 +323,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   });
 
   app.post("/api/v1/rkf/ingestions/:id/confirm", async (request, reply) => {
-    const reviewer = requireCoach(request, reply);
+    const reviewer = await requireCoach(request, reply);
     if (!reviewer) return;
     if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
     const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -336,7 +336,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   });
 
   app.post("/api/v1/rkf/ingestions/:id/transition", async (request, reply) => {
-    const actor = requireCoach(request, reply);
+    const actor = await requireCoach(request, reply);
     if (!actor) return;
     if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
     const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -352,13 +352,13 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   });
 
   app.get("/api/v1/rkf/prescriptions", async (request, reply) => {
-    const coach = requireCoach(request, reply);
+    const coach = await requireCoach(request, reply);
     if (!coach) return;
     return { data: (store?.list("prescriptions") ?? []).filter((item) => item.organizationId === coach.organizationId) };
   });
 
   app.post("/api/v1/rkf/prescriptions", async (request, reply) => {
-    const coach = requireCoach(request, reply);
+    const coach = await requireCoach(request, reply);
     if (!coach) return;
     if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
     const body = z.object({ prescription: z.record(z.unknown()), audit: z.record(z.unknown()), athleteId: z.string(), title: z.string().min(2) }).safeParse(request.body);
@@ -367,7 +367,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   });
 
   app.post("/api/v1/rkf/prescriptions/:id/approve", async (request, reply) => {
-    const coach = requireCoach(request, reply);
+    const coach = await requireCoach(request, reply);
     if (!coach) return;
     if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
     const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -445,7 +445,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   });
 
   app.get("/api/v1/rkf/sessions", async (request, reply) => {
-    const coach = requireCoach(request, reply);
+    const coach = await requireCoach(request, reply);
     if (!coach) return;
     const library = loadRkfLibrary();
     if (!library) return reply.code(503).send({ error: "Biblioteca RKF V5.1 indisponível" });
@@ -478,7 +478,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   });
 
   app.get("/api/v1/rkf/sessions/:id", async (request, reply) => {
-    const coach = requireCoach(request, reply);
+    const coach = await requireCoach(request, reply);
     if (!coach) return;
     const library = loadRkfLibrary();
     if (!library) return reply.code(503).send({ error: "Biblioteca RKF V5.1 indisponível" });
@@ -536,7 +536,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
     });
     const parsed = schema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "Requisição de adaptação inválida", details: parsed.error.flatten() });
-    const user = requireAuthenticated(request, reply);
+    const user = await requireAuthenticated(request, reply);
     if (!user) return;
     const { readiness, prescribedVolumeM, primaryZone, coachApproved, zoneMapping, persist, ...rest } = parsed.data;
     const decision = decideAdaptation({ readiness, prescribedVolumeM, primaryZone, guardrails: { readiness, ...rest }, coachApproved, zoneMapping });
@@ -602,7 +602,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
    * delta, e classifica. Alternativamente aceita o conjunto diretamente.
    */
   app.post("/api/v1/rkf/evolution/assess-set", async (request, reply) => {
-    const user = requireAuthenticated(request, reply);
+    const user = await requireAuthenticated(request, reply);
     if (!user) return;
     const sessionSchema = z.object({
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -655,7 +655,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
    * por chave comparável e avalia cada conjunto com dados suficientes.
    */
   app.get("/api/v1/rkf/evolution/athletes/:athleteId", async (request, reply) => {
-    const user = requireAuthenticated(request, reply);
+    const user = await requireAuthenticated(request, reply);
     if (!user) return;
     const { athleteId } = z.object({ athleteId: z.string() }).parse(request.params);
     const isOwn = athleteMayAccess(user, athleteId);

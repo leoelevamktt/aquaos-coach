@@ -15,8 +15,8 @@ const store = new ManagedStore(join(testRoot, "rkf.json"));
 await app.register(multipart);
 registerRkfRoutes(app, store);
 registerReportRoutes(app, store);
-const coachCookie = `natacao_session=${login("coach@natacao.local", "natacao-demo")!.token}`;
-const athleteCookie = `natacao_session=${login("ana@natacao.local", "natacao-demo")!.token}`;
+const coachCookie = `natacao_session=${(await login("coach@natacao.local", "natacao-demo"))!.token}`;
+const athleteCookie = `natacao_session=${(await login("ana@natacao.local", "natacao-demo"))!.token}`;
 beforeAll(async () => app.ready());
 afterAll(async () => { await app.close(); rmSync(testRoot, { recursive: true, force: true }); });
 

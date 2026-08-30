@@ -33,7 +33,7 @@ function sanitizeLine(line: string): string {
     .trim();
 }
 
-function renderContent(content: string) {
+export function renderContent(content: string) {
   // Markdown leve higienizado: **negrito**, listas "- "/"• ", quebras de linha.
   const blocks = content
     .split("\n")

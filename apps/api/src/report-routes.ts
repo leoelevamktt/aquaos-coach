@@ -18,8 +18,8 @@ type AthleteSnapshot = {
   provenance: { engine: string; engineVersion: string; status: string; hash: string };
 };
 
-function authorize(request: FastifyRequest, reply: FastifyReply, athleteId: string) {
-  const user = getSession(sessionToken(request));
+async function authorize(request: FastifyRequest, reply: FastifyReply, athleteId: string) {
+  const user = await getSession(sessionToken(request));
   if (!user) { void reply.code(401).send({ error: "Autenticação necessária" }); return undefined; }
   if (!roleAllows(user, ["coach", "admin"]) && !athleteMayAccess(user, athleteId)) { void reply.code(403).send({ error: "Acesso restrito ao próprio relatório" }); return undefined; }
   return user;
@@ -123,7 +123,7 @@ export function registerReportRoutes(app: FastifyInstance, store: ManagedStore) 
   const querySchema = z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
   app.get("/api/v1/reports/athletes/:athleteId.pdf", async (request, reply) => {
     const { athleteId } = z.object({ athleteId: z.string() }).parse(request.params);
-    const user = authorize(request, reply, athleteId); if (!user) return;
+    const user = await authorize(request, reply, athleteId); if (!user) return;
     const period = querySchema.parse(request.query);
     const snapshot = buildAthleteSnapshot(store, user.organizationId, athleteId, period);
     if (!snapshot) return reply.code(404).send({ error: "Atleta não encontrado" });
@@ -132,7 +132,7 @@ export function registerReportRoutes(app: FastifyInstance, store: ManagedStore) 
   });
   app.get("/api/v1/reports/athletes/:athleteId.csv", async (request, reply) => {
     const { athleteId } = z.object({ athleteId: z.string() }).parse(request.params);
-    const user = authorize(request, reply, athleteId); if (!user) return;
+    const user = await authorize(request, reply, athleteId); if (!user) return;
     const period = querySchema.parse(request.query);
     const snapshot = buildAthleteSnapshot(store, user.organizationId, athleteId, period);
     if (!snapshot) return reply.code(404).send({ error: "Atleta não encontrado" });
@@ -142,7 +142,7 @@ export function registerReportRoutes(app: FastifyInstance, store: ManagedStore) 
   /** PDF da sessão prescrita (modelo de piscina): só prescrições publicadas. */
   app.get("/api/v1/rkf/prescriptions/:id.pdf", async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
-    const user = getSession(sessionToken(request));
+    const user = await getSession(sessionToken(request));
     if (!user) return reply.code(401).send({ error: "Autenticação necessária" });
     if (!roleAllows(user, ["coach", "admin"])) return reply.code(403).send({ error: "PDF de prescrição é exclusivo da comissão técnica" });
     const record = store.get("prescriptions", id);

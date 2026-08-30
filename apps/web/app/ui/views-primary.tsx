@@ -26,7 +26,8 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate:
   // Atletas reais da API; contagem sempre consistente com a lista exibida
   const [roster, setRoster] = useState<AthleteProfile[] | null>(null);
   // Próxima competição do calendário (fallback: demo em dev)
-  const [meet, setMeet] = useState<{ name: string; startsOn?: string; pool?: string; priority?: string } | null>(null);
+  const [meet, setMeet] = useState<{ name: string; startsOn?: string; pool?: string; priority?: string; qualified?: number; entries?: number } | null>(null);
+  const [videoSummary, setVideoSummary] = useState({ total: 0, pending: 0 });
 
   useEffect(() => {
     const now = new Date();
@@ -36,11 +37,14 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate:
     setToday({ kicker: `${weekday} · ${dateLabel}`, greeting: hour < 12 ? "Bom dia, Leonardo." : hour < 18 ? "Boa tarde, Leonardo." : "Boa noite, Leonardo." });
     void apiRequest<{ data: Array<Record<string, unknown>> }>("/api/v1/athletes")
       .then((response) => {
+        const normalizeKey = (value: unknown) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^ath-/, "").replace(/[^a-z0-9]/g, "");
         const live = (response.data ?? []).map((record) => {
-          const fallback = athletes.find((demo) => demo.id === record.id) ?? athletes[0];
-          const name = String(record.name ?? fallback.name);
+          const nameFromApi = String(record.name ?? "");
+          const fallback = athletes.find((demo) => normalizeKey(demo.id) === normalizeKey(record.id) || normalizeKey(demo.name) === normalizeKey(nameFromApi));
+          const base = fallback ?? athletes[0];
+          const name = nameFromApi || base.name;
           const initials = name.split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase();
-          return { ...fallback, id: String(record.id), name, initials, group: String(record.group ?? fallback.group) };
+          return { ...base, id: String(record.id), name, initials, group: String(record.group ?? base.group) };
         });
         if (live.length) setRoster(live);
         else if (process.env.NODE_ENV !== "production") setRoster(athletes);
@@ -51,19 +55,28 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate:
         const upcoming = (response.data ?? [])
           .filter((record) => !record.startsOn || String(record.startsOn) >= new Date().toISOString().slice(0, 10))
           .sort((a, b) => String(a.startsOn ?? "").localeCompare(String(b.startsOn ?? "")))[0];
-        if (upcoming) setMeet({ name: String(upcoming.name ?? "Competição"), startsOn: String(upcoming.startsOn ?? ""), pool: String(upcoming.pool ?? "50 m"), priority: String(upcoming.priority ?? "A") });
-        else setMeet({ name: demoMeets[0].name, startsOn: new Date(Date.now() + demoMeets[0].days * 86_400_000).toISOString().slice(0, 10), pool: `${demoMeets[0].location} · Piscina ${demoMeets[0].pool}`, priority: demoMeets[0].priority });
+        if (upcoming) setMeet({ name: String(upcoming.name ?? "Competição"), startsOn: String(upcoming.startsOn ?? ""), pool: String(upcoming.pool ?? "50 m"), priority: String(upcoming.priority ?? "A"), qualified: upcoming.qualified == null ? undefined : Number(upcoming.qualified), entries: upcoming.entries == null ? undefined : Number(upcoming.entries) });
+        else setMeet({ name: demoMeets[0].name, startsOn: new Date(Date.now() + demoMeets[0].days * 86_400_000).toISOString().slice(0, 10), pool: `${demoMeets[0].location} · Piscina ${demoMeets[0].pool}`, priority: demoMeets[0].priority, qualified: demoMeets[0].qualified, entries: demoMeets[0].entries });
       })
-      .catch(() => setMeet({ name: demoMeets[0].name, startsOn: new Date(Date.now() + demoMeets[0].days * 86_400_000).toISOString().slice(0, 10), pool: `${demoMeets[0].location} · Piscina ${demoMeets[0].pool}`, priority: demoMeets[0].priority }));
+      .catch(() => setMeet({ name: demoMeets[0].name, startsOn: new Date(Date.now() + demoMeets[0].days * 86_400_000).toISOString().slice(0, 10), pool: `${demoMeets[0].location} · Piscina ${demoMeets[0].pool}`, priority: demoMeets[0].priority, qualified: demoMeets[0].qualified, entries: demoMeets[0].entries }));
+    void apiRequest<{ data: Array<Record<string, unknown>> }>("/api/v1/manage/videos")
+      .then((response) => setVideoSummary({ total: response.data.length, pending: response.data.filter((video) => String(video.status ?? "").toLowerCase() !== "reviewed").length }))
+      .catch(() => setVideoSummary({ total: 0, pending: 0 }));
   }, []);
 
   const displayAthletes = roster ?? [];
   const visibleCount = Math.min(displayAthletes.length, 4);
   const hiddenCount = Math.max(0, displayAthletes.length - visibleCount);
   const daysToMeet = meet?.startsOn ? Math.max(0, Math.round((new Date(meet.startsOn).getTime() - Date.now()) / 86_400_000)) : null;
+  const weeklyVolumeM = displayAthletes.reduce((sum, athlete) => sum + athlete.weeklyDistance, 0);
+  const readinessValues = displayAthletes.flatMap((athlete) => typeof athlete.readiness === "number" ? [athlete.readiness] : []);
+  const readinessAverage = readinessValues.length ? Math.round(readinessValues.reduce((sum, value) => sum + value, 0) / readinessValues.length) : null;
+  const readyCount = readinessValues.filter((value) => value >= 70).length;
+  const attentionCount = readinessValues.filter((value) => value < 70).length;
+  const attendanceAverage = displayAthletes.length ? Math.round(displayAthletes.reduce((sum, athlete) => sum + athlete.attendance, 0) / displayAthletes.length) : null;
 
   const exportDailyReport = () => {
-    const rows = [csvRow(["Indicador", "Valor"]), csvRow(["Atletas ativos", displayAthletes.length]), csvRow(["Volume semanal", "148,9 km"]), csvRow(["Readiness médio", "74/100"]), csvRow(["Presença", "91%"]), csvRow(["Provas filmadas", 4])];
+    const rows = [csvRow(["Indicador", "Valor"]), csvRow(["Atletas ativos", displayAthletes.length]), csvRow(["Volume semanal", `${(weeklyVolumeM / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km`]), csvRow(["Readiness médio", readinessAverage ?? "sem dados"]), csvRow(["Presença", attendanceAverage == null ? "sem dados" : `${attendanceAverage}%`]), csvRow(["Provas filmadas", videoSummary.total])];
     downloadFile(`relatorio-operacional-${new Date().toISOString().slice(0, 10)}.csv`, rows.join("\n"));
     onNotify("Relatório operacional exportado em CSV.");
   };
@@ -75,14 +88,14 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate:
       {meet && <article className="next-meet-card">
         <div className="meet-top"><span className="priority">PRIORIDADE {meet.priority}</span><Trophy size={18} /></div>
         <div><span>PRÓXIMA COMPETIÇÃO</span><h2>{meet.name}</h2><p><MapPin size={14} />{meet.pool ?? "Piscina 50 m"}</p></div>
-        <div className="meet-countdown"><strong>{daysToMeet ?? "—"}</strong><span>dias</span><div><b>4</b> atletas com índice<br /><b>12</b> provas inscritas</div></div>
+        <div className="meet-countdown"><strong>{daysToMeet ?? "—"}</strong><span>dias</span><div><b>{meet.qualified ?? "—"}</b> atletas com índice<br /><b>{meet.entries ?? "—"}</b> provas inscritas</div></div>
         <button onClick={() => onNavigate("seasons")}>Abrir competição <ArrowRight size={16} /></button>
       </article>}
       <div className="metric-grid">
         <Metric label="ATLETAS ATIVOS" value={displayAthletes.length ? String(displayAthletes.length) : "—"} detail={displayAthletes.length ? `${displayAthletes.length} no plantel` : "carregando"} icon={Users} />
-        <Metric label="READINESS MÉDIO" value="74 / 100" detail="4 atletas prontos · 1 atenção" icon={Gauge} tone="violet" />
-        <Metric label="PRESENÇA" value="91%" detail="32 de 35 presenças" icon={CircleCheck} tone="blue" />
-        <Metric label="PROVAS FILMADAS" value="4" detail="2 aguardam sua revisão" icon={Film} tone="orange" />
+        <Metric label="READINESS MÉDIO" value={readinessAverage == null ? "—" : `${readinessAverage} / 100`} detail={`${readyCount} prontos · ${attentionCount} em atenção`} icon={Gauge} tone="violet" />
+        <Metric label="PRESENÇA" value={attendanceAverage == null ? "—" : `${attendanceAverage}%`} detail="Média do plantel ativo" icon={CircleCheck} tone="blue" />
+        <Metric label="PROVAS FILMADAS" value={String(videoSummary.total)} detail={`${videoSummary.pending} aguardam revisão`} icon={Film} tone="orange" />
       </div>
     </section>
     <section className="today-layout">

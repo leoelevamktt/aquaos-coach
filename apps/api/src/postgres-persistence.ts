@@ -60,6 +60,13 @@ export class PostgresPersistence {
       );
       CREATE INDEX IF NOT EXISTS managed_audit_org_idx
         ON managed_audit (organization_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS auth_sessions (
+        token_hash TEXT PRIMARY KEY,
+        user_payload JSONB NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS auth_sessions_expiry_idx ON auth_sessions (expires_at);
       CREATE TABLE IF NOT EXISTS rkf_seed_imports (
         id TEXT PRIMARY KEY,
         organization_id TEXT NOT NULL,
@@ -170,6 +177,29 @@ export class PostgresPersistence {
     } finally {
       client.release();
     }
+  }
+
+  async saveAuthSession(tokenHash: string, user: Record<string, unknown>, expiresAt: number) {
+    await this.pool.query(`
+      INSERT INTO auth_sessions (token_hash, user_payload, expires_at)
+      VALUES ($1, $2::jsonb, to_timestamp($3 / 1000.0))
+      ON CONFLICT (token_hash) DO UPDATE
+      SET user_payload = EXCLUDED.user_payload, expires_at = EXCLUDED.expires_at
+    `, [tokenHash, JSON.stringify(user), expiresAt]);
+  }
+
+  async getAuthSession(tokenHash: string) {
+    const result = await this.pool.query<{ user_payload: Record<string, unknown>; expires_at_ms: number }>(`
+      SELECT user_payload, (extract(epoch FROM expires_at) * 1000)::bigint AS expires_at_ms
+      FROM auth_sessions
+      WHERE token_hash = $1 AND expires_at > now()
+    `, [tokenHash]);
+    const row = result.rows[0];
+    return row ? { user: row.user_payload, expiresAt: Number(row.expires_at_ms) } : undefined;
+  }
+
+  async deleteAuthSession(tokenHash: string) {
+    await this.pool.query("DELETE FROM auth_sessions WHERE token_hash = $1", [tokenHash]);
   }
 
   health(): PersistenceHealth { return { driver: "postgres", connected: true, lastPersistedAt: this.lastPersistedAt }; }

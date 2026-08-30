@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { Role, User } from "@natacao/domain";
 import type { ManagedStore } from "./managed-store.js";
 
@@ -16,11 +16,13 @@ type StoredSession = { user: User; expiresAt: number };
 
 type AuthStore = {
   saveAccount(account: StoredAccount): void;
-  deleteSession(token: string): void;
-  saveSession(token: string, session: StoredSession): void;
+  deleteSession(tokenHash: string): Promise<void>;
+  getSession(tokenHash: string): Promise<StoredSession | undefined>;
+  saveSession(tokenHash: string, session: StoredSession): Promise<void>;
 };
 
 const derive = (value: string, salt: string) => scryptSync(value, salt, 32).toString("hex");
+const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const isProduction = () => process.env.NODE_ENV === "production";
 
@@ -37,10 +39,12 @@ function toAuthStore(managed: ManagedStore): AuthStore {
       if (record) managed.update("users", account.id, payload);
       else managed.create("users", { ...payload, id: account.id, title: account.name });
     },
-    deleteSession(token) { managed.remove("authSessions", token); },
-    saveSession(token, session) {
-      managed.create("authSessions", { id: token, title: `sessão ${session.user.email}`, user: session.user, expiresAt: session.expiresAt });
+    deleteSession(hash) { return managed.deleteAuthSession(hash); },
+    async getSession(hash) {
+      const session = await managed.getAuthSession(hash);
+      return session ? { user: session.user as unknown as User, expiresAt: session.expiresAt } : undefined;
     },
+    saveSession(hash, session) { return managed.saveAuthSession(hash, session.user as unknown as Record<string, unknown>, session.expiresAt); },
   };
 }
 
@@ -50,10 +54,6 @@ export function attachAuthStore(managed: ManagedStore) {
   for (const record of managed.list("users")) {
     const account = record as unknown as StoredAccount;
     if (account?.id && account.email && account.passwordHash && account.passwordSalt) accounts.set(account.id, account);
-  }
-  for (const record of managed.list("authSessions")) {
-    const session = record as unknown as StoredSession & { id: string };
-    if (session?.id && session.user && session.expiresAt > Date.now()) sessions.set(session.id, { user: session.user, expiresAt: session.expiresAt });
   }
   ensureSeedUsers();
 }
@@ -73,8 +73,7 @@ function createAccount(input: { id: string; organizationId: string; name: string
 /**
  * Seeding idempotente:
  * - dev/testes: contas demo fixas (compatibilidade com a suíte existente);
- * - produção: e-mails das env AUTH_*_EMAIL; senha das env AUTH_*_PASSWORD;
- *   sem senha no env, gera aleatória e imprime UMA vez no console.
+ * - produção: e-mails e senhas vêm exclusivamente das env AUTH_*.
  */
 export function ensureSeedUsers() {
   if (seeded) return;
@@ -91,18 +90,18 @@ export function ensureSeedUsers() {
   const coachEmail = process.env.AUTH_COACH_EMAIL ?? "treinador@elevamkt.digital";
   const athleteEmail = process.env.AUTH_ATHLETE_EMAIL ?? "atleta@elevamkt.digital";
   if (![...accounts.values()].some((account) => account.email === coachEmail)) {
-    const password = process.env.AUTH_COACH_PASSWORD ?? randomBytes(12).toString("base64url");
-    if (!process.env.AUTH_COACH_PASSWORD) console.log(`[AUTH] senha gerada para ${coachEmail}: ${password}`);
+    const password = process.env.AUTH_COACH_PASSWORD;
+    if (!password) throw new Error("AUTH_COACH_PASSWORD é obrigatória para provisionar o treinador em produção");
     createAccount({ id: "user-prod-coach", organizationId: "org-demo", name: "Treinador Eleva", email: coachEmail, role: "coach", password });
   }
   if (![...accounts.values()].some((account) => account.email === athleteEmail)) {
-    const password = process.env.AUTH_ATHLETE_PASSWORD ?? randomBytes(12).toString("base64url");
-    if (!process.env.AUTH_ATHLETE_PASSWORD) console.log(`[AUTH] senha gerada para ${athleteEmail}: ${password}`);
+    const password = process.env.AUTH_ATHLETE_PASSWORD;
+    if (!password) throw new Error("AUTH_ATHLETE_PASSWORD é obrigatória para provisionar o atleta em produção");
     createAccount({ id: "user-prod-athlete", organizationId: "org-demo", name: "Ana Souza", email: athleteEmail, role: "athlete", athleteId: "ana-souza", password });
   }
 }
 
-export function login(identifier: string, password: string) {
+export async function login(identifier: string, password: string) {
   ensureSeedUsers();
   const normalized = identifier.trim().toLowerCase();
   const cpfDigits = normalized.replace(/\D/g, "");
@@ -113,25 +112,26 @@ export function login(identifier: string, password: string) {
   const received = Buffer.from(derive(password, account.passwordSalt));
   if (expected.length !== received.length || !timingSafeEqual(expected, received)) return undefined;
   const { passwordHash: _passwordHash, passwordSalt: _passwordSalt, cpf: _cpf, ...user } = account;
-  const token = randomBytes(32).toString("hex");
+  const token = randomBytes(32).toString("base64url");
   const session: StoredSession = { user, expiresAt: Date.now() + SESSION_TTL_MS };
   sessions.set(token, session);
-  store?.saveSession(token, session);
+  await store?.saveSession(tokenHash(token), session);
   return { token, user };
 }
 
-export function getSession(token?: string) {
+export async function getSession(token?: string) {
   if (!token) return undefined;
-  const session = sessions.get(token);
+  const session = sessions.get(token) ?? await store?.getSession(tokenHash(token));
   if (!session) return undefined;
-  if (session.expiresAt <= Date.now()) { sessions.delete(token); store?.deleteSession(token); return undefined; }
+  if (session.expiresAt <= Date.now()) { sessions.delete(token); await store?.deleteSession(tokenHash(token)); return undefined; }
+  sessions.set(token, session);
   return session.user;
 }
 
-export function logout(token?: string) {
+export async function logout(token?: string) {
   if (!token) return;
   sessions.delete(token);
-  store?.deleteSession(token);
+  await store?.deleteSession(tokenHash(token));
 }
 
 export function roleAllows(user: User | undefined, roles: Role[]) { return Boolean(user && roles.includes(user.role)); }

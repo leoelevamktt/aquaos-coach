@@ -178,6 +178,25 @@ export class ManagedStore {
     return { driver: "file-atomic" as const, importId: input.id, importedRows: input.files.reduce((sum, file) => sum + file.rows.length, 0), files: input.files.length };
   }
 
+  async saveAuthSession(tokenHash: string, user: Record<string, unknown>, expiresAt: number) {
+    if (this.postgres) return this.postgres.saveAuthSession(tokenHash, user, expiresAt);
+    const current = this.get("authSessions", tokenHash);
+    if (current) this.update("authSessions", tokenHash, { user, expiresAt });
+    else this.create("authSessions", { id: tokenHash, title: "sessão autenticada", user, expiresAt });
+  }
+
+  async getAuthSession(tokenHash: string) {
+    if (this.postgres) return this.postgres.getAuthSession(tokenHash);
+    const record = this.get("authSessions", tokenHash);
+    if (!record || Number(record.expiresAt) <= Date.now()) return undefined;
+    return { user: record.user as Record<string, unknown>, expiresAt: Number(record.expiresAt) };
+  }
+
+  async deleteAuthSession(tokenHash: string) {
+    if (this.postgres) return this.postgres.deleteAuthSession(tokenHash);
+    this.remove("authSessions", tokenHash);
+  }
+
   list(kind: ResourceKind) { return this.data.resources[kind].slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); }
   get(kind: ResourceKind, id: string) { return this.data.resources[kind].find((item) => item.id === id); }
   audit(limit = 100) { return this.data.audit.slice(-limit).reverse(); }

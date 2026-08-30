@@ -228,7 +228,7 @@ async function callLLm(messages: Array<{ role: string; content: string }>): Prom
 
 export function registerAiRoutes(app: FastifyInstance, store: ManagedStore) {
   app.get("/api/v1/ai/status", async (request, reply) => {
-    const user = getSession(sessionToken(request));
+    const user = await getSession(sessionToken(request));
     if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação exclusiva da comissão técnica" : "Autenticação necessária" });
     return ({
     available: Boolean(LLM_API_KEY),
@@ -238,7 +238,7 @@ export function registerAiRoutes(app: FastifyInstance, store: ManagedStore) {
   });
 
   app.post("/api/v1/ai/chat", async (request, reply) => {
-    const user = getSession(sessionToken(request));
+    const user = await getSession(sessionToken(request));
     if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação exclusiva da comissão técnica" : "Autenticação necessária" });
     const body = (await request.body) as { messages?: ChatMessage[] } | null;
     const history = Array.isArray(body?.messages) ? body!.messages!.slice(-12) : [];
