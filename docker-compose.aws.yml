@@ -62,7 +62,7 @@ services:
       # Assistente IA (gateway substituível; vazio = assistente desativado)
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.elevamkt.digital/v1}
-      LLM_MODEL: ${LLM_MODEL:-llmapi/glm-5.3}
+      LLM_MODEL: ${LLM_MODEL:-auto/best-chat}
       # Provisionamento de contas de produção (senhas nunca no código)
       AUTH_COACH_EMAIL: ${AUTH_COACH_EMAIL:-treinador@elevamkt.digital}
       AUTH_COACH_PASSWORD: ${AUTH_COACH_PASSWORD:-}

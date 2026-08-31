@@ -6,7 +6,8 @@ type ChatMessage = { role: "user" | "assistant"; content: string };
 
 const LLM_BASE_URL = process.env.LLM_BASE_URL ?? "https://api.elevamkt.digital/v1";
 const LLM_API_KEY = process.env.LLM_API_KEY ?? "";
-const LLM_MODEL = process.env.LLM_MODEL ?? "llmapi/glm-5.3";
+const LLM_MODEL = process.env.LLM_MODEL ?? "auto/best-chat";
+let statusCache: { checkedAt: number; available: boolean; reason?: string } | undefined;
 
 function esc(value: unknown): string {
   return String(value ?? "—");
@@ -195,8 +196,15 @@ async function callLLm(messages: Array<{ role: string; content: string }>): Prom
       body: JSON.stringify({ model: LLM_MODEL, messages, max_tokens: 1600, temperature: 0.4, stream: false }),
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(`LLM respondeu ${response.status}`);
     const raw = await response.text();
+    if (!response.ok) {
+      let detail = "erro sem detalhes";
+      try {
+        const payload = JSON.parse(raw) as { error?: { message?: string } };
+        detail = payload.error?.message?.trim() || detail;
+      } catch { /* resposta não JSON: mantém erro sanitizado */ }
+      throw new Error(`LLM respondeu ${response.status}: ${detail.slice(0, 240)}`);
+    }
     // Alguns gateways ignoram stream:false e devolvem SSE — tratar ambos os formatos.
     const contentType = response.headers.get("content-type") ?? "";
     if (raw.startsWith("data:") || contentType.includes("text/event-stream")) {
@@ -226,15 +234,35 @@ async function callLLm(messages: Array<{ role: string; content: string }>): Prom
   }
 }
 
+async function inspectLlmAvailability() {
+  if (!LLM_API_KEY) return { available: false, reason: "LLM_API_KEY não configurada" };
+  if (statusCache && Date.now() - statusCache.checkedAt < 60_000) return statusCache;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(`${LLM_BASE_URL}/models`, { headers: { authorization: `Bearer ${LLM_API_KEY}` }, signal: controller.signal });
+    if (!response.ok) {
+      statusCache = { checkedAt: Date.now(), available: false, reason: `Gateway respondeu ${response.status}` };
+      return statusCache;
+    }
+    const payload = await response.json() as { data?: Array<{ id?: string }> };
+    const available = Boolean(payload.data?.some((model) => model.id === LLM_MODEL));
+    statusCache = { checkedAt: Date.now(), available, reason: available ? undefined : `Modelo ${LLM_MODEL} não está liberado para esta chave` };
+    return statusCache;
+  } catch (error) {
+    statusCache = { checkedAt: Date.now(), available: false, reason: error instanceof Error && error.name === "AbortError" ? "Gateway não respondeu em 10s" : "Falha ao consultar o gateway" };
+    return statusCache;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function registerAiRoutes(app: FastifyInstance, store: ManagedStore) {
   app.get("/api/v1/ai/status", async (request, reply) => {
     const user = await getSession(sessionToken(request));
     if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação exclusiva da comissão técnica" : "Autenticação necessária" });
-    return ({
-    available: Boolean(LLM_API_KEY),
-    model: LLM_API_KEY ? LLM_MODEL : null,
-    gateway: LLM_API_KEY ? LLM_BASE_URL : null,
-    });
+    const health = await inspectLlmAvailability();
+    return { available: health.available, reason: health.reason, model: LLM_API_KEY ? LLM_MODEL : null, gateway: LLM_API_KEY ? LLM_BASE_URL : null };
   });
 
   app.post("/api/v1/ai/chat", async (request, reply) => {
