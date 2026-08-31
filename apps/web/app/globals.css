@@ -85,7 +85,10 @@ h1, h2, h3, strong, b { font-family: var(--font-display), var(--font-ui), sans-s
 .main-nav button em { min-width: 20px; height: 18px; display: grid; place-items: center; border-radius: 9px; background: #e36a61; color: #fff; font-style: normal; font-size: 10px; font-weight: 700; }
 .sidebar-footer { display: grid; gap: 8px; }
 .demo-notice { display: flex; align-items: center; gap: 9px; border-radius: 9px; background: #14343d; color: #63cfbd; padding: 10px; }
-.coach-card { display: grid; grid-template-columns: 30px 1fr 18px; align-items: center; gap: 9px; padding: 9px 7px 3px; }
+.coach-card { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 9px; padding: 9px 7px 3px; }
+.coach-logout-button { width: 100%; min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid #31505a; border-radius: 9px; background: #102b35; color: #dbe8eb; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; transition: background .18s ease, border-color .18s ease; }
+.coach-logout-button:hover { background: #183944; border-color: #4c7079; }
+.coach-logout-button:disabled { cursor: wait; opacity: .65; }
 .workspace { padding-left: 246px; min-height: 100dvh; }
 .topbar { height: 64px; position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 18px; background: rgba(250,252,251,.88); border-bottom: 1px solid rgba(203,217,216,.78); padding: 0 30px; backdrop-filter: blur(18px) saturate(135%); box-shadow: 0 1px 0 rgba(255,255,255,.75); }
 .global-search { width: min(440px, 45vw); min-width: 0; display: flex; align-items: center; gap: 9px; background: #f4f7f7; border: 1px solid transparent; border-radius: 9px; padding: 8px 10px; color: #7a8a90; }
@@ -245,15 +248,16 @@ h1, h2, h3, strong, b { font-family: var(--font-display), var(--font-ui), sans-s
 .athlete-identity p { color: var(--muted); margin-top: 3px; font-size: 11px; }
 .athlete-hero-actions { display: flex; gap: 8px; }
 .athlete-dashboard { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, .72fr); gap: 16px; }
-.goal-route { display: grid; grid-template-columns: 1fr 95px minmax(100px, .65fr) 95px; align-items: center; gap: 10px; background: #f6faf9; border: 1px solid #e3eeec; border-radius: 11px; padding: 15px; }
-.goal-route > div:first-child { display: flex; flex-direction: column; }
+.goal-route { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(90px, 110px) minmax(120px, .75fr) minmax(90px, 110px); align-items: center; gap: 10px; background: #f6faf9; border: 1px solid #e3eeec; border-radius: 11px; padding: 15px; }
+.goal-route > * { min-width: 0; }
+.goal-route > div:first-child { display: flex; flex-direction: column; overflow-wrap: anywhere; }
 .goal-route small { color: #798a8f; font-size: 8px; letter-spacing: .8px; }
 .goal-route strong { margin: 4px 0; font-size: 14px; }.goal-route span { color: var(--muted); font-size: 9px; }
 .time-node { display: flex; flex-direction: column; align-items: center; padding: 10px; border: 1px solid #cfdcdd; border-radius: 8px; background: #fff; }
 .time-node b { font-size: 14px; margin-top: 3px; }.time-node.target { border-color: #72c5b5; background: #ebf8f5; color: var(--teal-dark); }
-.route-line { height: 5px; border-radius: 3px; background: #dce8e6; position: relative; }
-.route-line i { display: block; height: 100%; border-radius: inherit; background: var(--teal); }
-.route-line span { position: absolute; white-space: nowrap; top: 10px; left: 25%; font-size: 7px; }
+.route-line { display: grid; grid-template-rows: 6px auto; gap: 8px; align-self: center; border-radius: 3px; background: linear-gradient(to bottom, #dce8e6 0 6px, transparent 6px); }
+.route-line i { display: block; height: 6px; border-radius: inherit; background: var(--teal); }
+.route-line span { position: static; display: block; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: center; line-height: 1.25; font-size: 7px; }
 .goal-gap { display: flex; align-items: center; gap: 7px; margin-top: 11px; padding: 9px 12px; background: #fff7e8; border-radius: 8px; color: #a66d1e; }
 .goal-gap span { font-size: 9px; }.goal-gap strong { font-size: 13px; }.goal-gap small { margin-left: auto; color: #967c57; font-size: 8px; }
 .empty-state { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #859499; }
@@ -1272,7 +1276,8 @@ body :is(
   opacity: .5;
 }
 .route-line {
-  height: 6px;
+  height: auto;
+  min-height: 6px;
   background: #d5e4e1;
   box-shadow: inset 0 1px 2px rgba(9, 40, 46, .1);
 }

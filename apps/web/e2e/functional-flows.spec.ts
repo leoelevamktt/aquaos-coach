@@ -50,6 +50,30 @@ async function loginAthlete(page: Page) {
 }
 
 test.describe("fluxos do coach", () => {
+  test("card de meta não sobrepõe evolução e alvo", async ({ page }) => {
+    await loginCoach(page);
+    for (const width of [768, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`${BASE}/pt/coach/athletes/ana-souza`, { waitUntil: "networkidle" });
+      const route = page.locator(".goal-route");
+      await expect(route).toBeVisible();
+      const geometry = await route.evaluate((element) => {
+        const label = element.querySelector<HTMLElement>(".route-line span")?.getBoundingClientRect();
+        const target = element.querySelector<HTMLElement>(".time-node.target")?.getBoundingClientRect();
+        return { scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, labelRight: label?.right ?? 0, targetLeft: target?.left ?? 0 };
+      });
+      expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+      expect(geometry.labelRight).toBeLessThanOrEqual(geometry.targetLeft);
+    }
+  });
+
+  test("logout do treinador encerra a sessão e permite trocar de perfil", async ({ page, isMobile }) => {
+    await loginCoach(page);
+    if (isMobile) await page.getByRole("button", { name: "Abrir menu" }).click();
+    await page.getByRole("button", { name: "Sair / trocar perfil" }).click();
+    await expect(page.getByRole("textbox", { name: "E-mail" })).toBeVisible({ timeout: 20_000 });
+  });
+
   test("cria e publica treino pelo fluxo completo", async ({ page }) => {
     const failures: string[] = [];
     page.on("pageerror", (error) => failures.push(String(error)));

@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowRight, BarChart3, Bell, Calendar, ChevronDown, CircleCheck, Film, Gauge, Home, Inbox, Link2,
-  Menu, MoreHorizontal, Plus, Search, Settings, SlidersHorizontal, Sparkles, Trophy, Users, Waves,
+  LogOut, Menu, Plus, Search, Settings, SlidersHorizontal, Sparkles, Trophy, Users, Waves,
   Wifi,
 } from "lucide-react";
 import { athletes, hydrateAthlete, meets, videos, type AthleteProfile } from "./demo-data";
@@ -66,6 +66,7 @@ function CoachWorkspace() {
   const [workoutRefresh, setWorkoutRefresh] = useState(0);
   const [liveVersion, setLiveVersion] = useState(0);
   const [liveStatus, setLiveStatus] = useState<"connecting" | "open" | "error">("connecting");
+  const [signingOut, setSigningOut] = useState(false);
   const [managedAthletes, setManagedAthletes] = useState<AthleteProfile[]>(athletes);
   const searchInput = useRef<HTMLInputElement>(null);
   const athleteId = pathname.split("/athletes/")[1]?.split("/")[0];
@@ -80,6 +81,12 @@ function CoachWorkspace() {
     ...nav.filter((item) => item.label.toLowerCase().includes(search.toLowerCase())).slice(0, 3).map((item) => ({ id: item.id, label: item.label, detail: "Módulo", action: () => go(item.id) })),
   ] : [];
   const selectSearch = (action: () => void) => { action(); setSearch(""); };
+  const signOut = async () => {
+    setSigningOut(true);
+    try { await apiRequest("/api/v1/auth/logout", { method: "POST" }); }
+    catch { /* sessão já pode ter expirado */ }
+    finally { window.location.assign("/pt/coach/today"); }
+  };
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); searchInput.current?.focus(); }
@@ -111,7 +118,8 @@ function CoachWorkspace() {
       </nav>
       <div className="sidebar-footer">
         <div className="demo-notice"><Sparkles size={17} /><span><strong>Método RKF V5.1</strong><small>Núcleo em validação</small></span></div>
-        <div className="coach-card"><Avatar initials="LM" color="#d9ece8" small /><span><strong>Leonardo Martins</strong><small>Head coach</small></span><MoreHorizontal size={18} /></div>
+        <div className="coach-card"><Avatar initials="LM" color="#d9ece8" small /><span><strong>Leonardo Martins</strong><small>Head coach</small></span></div>
+        <button className="coach-logout-button" type="button" onClick={() => void signOut()} disabled={signingOut}><LogOut size={16} />{signingOut ? "Saindo…" : "Sair / trocar perfil"}</button>
       </div>
     </aside>
     {mobileOpen && <button className="scrim" aria-label="Fechar menu" onClick={() => setMobileOpen(false)} />}
