@@ -101,7 +101,7 @@ const formatCoverage: Array<{ format: string; scope: string; status: CoverageSta
   { format: "JSON", scope: "Integrações internas", status: "REVIEW", limitation: "Aceito apenas nos contratos e recursos já definidos." },
   { format: "XLSX", scope: "Planilhas modernas", status: "REVIEW", limitation: "Extrai abas e prévia; não converte toda fórmula em regra executável." },
   { format: "PDF / DOCX", scope: "Documentos textuais", status: "REVIEW", limitation: "Extrai texto; exige revisão humana para virar metodologia." },
-  { format: "ZIP", scope: "Pacote RKF V5.1", status: "REVIEW", limitation: "Pacote canônico incorporado; importador genérico de arquivos ZIP não está homologado." },
+  { format: "ZIP", scope: "Pacote RKF V5.1", status: "PASS", limitation: "Importação genérica de CSV, JSON, XLSX e TXT com validação antitraversal e limites anti-zip-bomb." },
   { format: "PDF escaneado / imagem", scope: "OCR", status: "BLOCKED", limitation: "Preservado para processamento; OCR em português ainda não homologado." },
   { format: "XLS / DOC", scope: "Formatos legados", status: "BLOCKED", limitation: "Preservação disponível, sem extração confiável." },
 ];
@@ -250,7 +250,7 @@ function PrescriptionStudio({ data, prescriptions, busy, setBusy, refresh, onNot
   const save = async () => {
     if (!result?.prescription) return;
     setBusy("save");
-    try { await apiRequest("/api/v1/rkf/prescriptions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prescription: result.prescription, audit: result.audit, athleteId: data.athlete.id, title: result.prescription.title }) }); await refresh(); onNotify("Versão salva e enviada para aprovação do treinador."); setResult(null); } catch (requestError) { onNotify(requestError instanceof Error ? requestError.message : "Falha ao salvar"); } finally { setBusy(""); }
+    try { await apiRequest("/api/v1/rkf/prescriptions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prescription: result.prescription, audit: result.audit, athleteId: data.athlete.id, title: result.prescription.title, targetType: "athlete", targetId: data.athlete.id }) }); await refresh(); onNotify("Versão salva e enviada para aprovação do treinador."); setResult(null); } catch (requestError) { onNotify(requestError instanceof Error ? requestError.message : "Falha ao salvar"); } finally { setBusy(""); }
   };
   const approve = async (id: string) => {
     setBusy(id); try { await apiRequest(`/api/v1/rkf/prescriptions/${id}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); await refresh(); onNotify("Prescrição aprovada, publicada e congelada como snapshot imutável."); } catch (requestError) { onNotify(requestError instanceof Error ? requestError.message : "Falha ao aprovar"); } finally { setBusy(""); }
@@ -302,7 +302,11 @@ function IngestionStudio({ ingestions, busy, setBusy, refresh, onNotify }: { ing
   };
   const create = async () => {
     setBusy("ingest");
-    try { await apiRequest("/api/v1/rkf/ingestions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ channel, title, original, parsedData: { athleteId: "ana-souza", date: "2026-08-30", kind: "training_session", rawPrescription: original } }) }); await refresh(); onNotify("Ingestão armazenada com hash e enviada para revisão humana."); } catch (requestError) { onNotify(requestError instanceof Error ? requestError.message : "Falha na ingestão"); } finally { setBusy(""); }
+    try {
+      const voice = channel === "VOICE";
+      await apiRequest(voice ? "/api/v1/rkf/voice/ingestions" : "/api/v1/rkf/ingestions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(voice ? { title, transcript: original, provider: "browser-or-manual", confidence: 0.5 } : { channel, title, original, parsedData: { athleteId: "ana-souza", date: "2026-08-30", kind: "training_session", rawPrescription: original } }) });
+      await refresh(); onNotify(voice ? "Ditado armazenado com transcript imutável e enviado para revisão." : "Ingestão armazenada com hash e enviada para revisão humana.");
+    } catch (requestError) { onNotify(requestError instanceof Error ? requestError.message : "Falha na ingestão"); } finally { setBusy(""); }
   };
   const confirm = async (id: string) => { setBusy(id); try { await apiRequest(`/api/v1/rkf/ingestions/${id}/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); await refresh(); onNotify("Registro confirmado. O original e seu hash foram preservados."); } catch (requestError) { onNotify(requestError instanceof Error ? requestError.message : "Falha ao confirmar"); } finally { setBusy(""); } };
   const advance = async (item: Ingestion) => {

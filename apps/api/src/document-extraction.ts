@@ -54,13 +54,21 @@ type ZipEntryMetadata = {
   uncompressedSize?: number;
 };
 
+export type SafeArchiveEntry = {
+  path: string;
+  extension: string;
+  sizeBytes: number;
+  content: Buffer;
+};
+
 function unsafeArchivePath(path: string) {
   const normalized = path.replace(/\\/g, "/");
   return normalized.includes("\u0000") || normalized.startsWith("/") || /^[a-zA-Z]:\//.test(normalized)
     || normalized.split("/").some((segment) => segment === "..");
 }
 
-async function extractArchive(buffer: Buffer): Promise<DocumentExtraction> {
+/** Lê entradas de ZIP depois de aplicar todos os limites de segurança. */
+export async function readSafeArchiveEntries(buffer: Buffer): Promise<SafeArchiveEntry[]> {
   const zip = await JSZip.loadAsync(buffer, { checkCRC32: true, createFolders: false });
   const files = Object.values(zip.files).filter((entry) => !entry.dir);
   if (files.length > MAX_ARCHIVE_ENTRIES) throw new Error(`ZIP excede o limite de ${MAX_ARCHIVE_ENTRIES} arquivos.`);
@@ -82,24 +90,72 @@ async function extractArchive(buffer: Buffer): Promise<DocumentExtraction> {
     return { entry, uncompressedSize };
   });
 
+  const entries: SafeArchiveEntry[] = [];
+  for (const { entry, uncompressedSize } of inspected) {
+    const content = await entry.async("nodebuffer");
+    if (content.length > MAX_ARCHIVE_ENTRY_BYTES) throw new Error(`Arquivo ${entry.name} excede 10 MB após descompactação.`);
+    entries.push({ path: entry.name, extension: extname(entry.name).toLowerCase(), sizeBytes: content.length || uncompressedSize, content });
+  }
+  return entries;
+}
+
+/**
+ * Converte um XLSX em registros usando a primeira linha não vazia de cada aba
+ * como cabeçalho. Fórmulas/valores são preservados como valores calculados ou
+ * texto; a aba permanece no campo `__sheet` para auditoria.
+ */
+export async function extractSpreadsheetRows(buffer: Buffer): Promise<Record<string, unknown>[]> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
+  const scalar = (value: unknown): unknown => {
+    if (value instanceof Date) return value.toISOString();
+    if (value && typeof value === "object") {
+      const formula = value as { result?: unknown; formula?: string; text?: string };
+      return formula.result ?? formula.text ?? formula.formula ?? JSON.stringify(value);
+    }
+    return value ?? "";
+  };
+  const rows: Record<string, unknown>[] = [];
+  for (const sheet of workbook.worksheets) {
+    const values: unknown[][] = [];
+    sheet.eachRow({ includeEmpty: false }, (row) => values.push((row.values as unknown[]).slice(1).map(scalar)));
+    if (!values.length) continue;
+    const headerValues = values[0] ?? [];
+    const usedHeaders = new Map<string, number>();
+    const headers = headerValues.map((value, index) => {
+      const base = String(value ?? "").replace(/^\uFEFF/, "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9_]+/gi, "_").replace(/^_+|_+$/g, "") || `column_${index + 1}`;
+      const occurrence = (usedHeaders.get(base) ?? 0) + 1;
+      usedHeaders.set(base, occurrence);
+      return occurrence === 1 ? base : `${base}_${occurrence}`;
+    });
+    for (const valuesRow of values.slice(1)) {
+      if (!valuesRow.some((value) => value !== "" && value !== null && value !== undefined)) continue;
+      const record: Record<string, unknown> = { __sheet: sheet.name };
+      headers.forEach((header, index) => { record[header] = valuesRow[index] ?? ""; });
+      rows.push(record);
+    }
+  }
+  return rows;
+}
+
+async function extractArchive(buffer: Buffer): Promise<DocumentExtraction> {
+  const files = await readSafeArchiveEntries(buffer);
   const entries: ArchiveEntryExtraction[] = [];
   const textParts: string[] = [];
-  for (const { entry, uncompressedSize } of inspected) {
-    const extension = extname(entry.name).toLowerCase();
+  for (const file of files) {
+    const extension = file.extension;
     if (extension === ".zip") {
-      entries.push({ path: entry.name, sizeBytes: uncompressedSize, status: "skipped", format: "zip", warnings: ["ZIP aninhado não é processado por segurança."] });
+      entries.push({ path: file.path, sizeBytes: file.sizeBytes, status: "skipped", format: "zip", warnings: ["ZIP aninhado não é processado por segurança."] });
       continue;
     }
     if (!ARCHIVE_EXTRACTABLE_EXTENSIONS.has(extension as (typeof DOCUMENT_UPLOAD_EXTENSIONS)[number])) {
-      entries.push({ path: entry.name, sizeBytes: uncompressedSize, status: "skipped", format: extension.slice(1) || "unknown", warnings: ["Formato não suportado dentro do ZIP; original preservado no arquivo principal."] });
+      entries.push({ path: file.path, sizeBytes: file.sizeBytes, status: "skipped", format: extension.slice(1) || "unknown", warnings: ["Formato não suportado dentro do ZIP; original preservado no arquivo principal."] });
       continue;
     }
-    const content = await entry.async("nodebuffer");
-    if (content.length > MAX_ARCHIVE_ENTRY_BYTES) throw new Error(`Arquivo ${entry.name} excede 10 MB após descompactação.`);
-    if (!signatureMatches(content, extension)) throw new Error(`O conteúdo de ${entry.name} não corresponde à extensão informada.`);
-    const extraction = await extractDocument(content, entry.name);
-    entries.push({ path: entry.name, sizeBytes: content.length, status: extraction.status, format: extraction.format, textLength: extraction.textLength, warnings: extraction.warnings, error: extraction.error });
-    if (extraction.text) textParts.push(`### ${entry.name}\n${extraction.text}`);
+    if (!signatureMatches(file.content, extension)) throw new Error(`O conteúdo de ${file.path} não corresponde à extensão informada.`);
+    const extraction = await extractDocument(file.content, file.path);
+    entries.push({ path: file.path, sizeBytes: file.sizeBytes, status: extraction.status, format: extraction.format, textLength: extraction.textLength, warnings: extraction.warnings, error: extraction.error });
+    if (extraction.text) textParts.push(`### ${file.path}\n${extraction.text}`);
   }
   const text = trimText(textParts.join("\n\n"));
   const extractedEntries = entries.filter((entry) => entry.status === "extracted").length;
@@ -109,7 +165,7 @@ async function extractArchive(buffer: Buffer): Promise<DocumentExtraction> {
     format: "zip",
     text: text || undefined,
     textLength: text.length,
-    archive: { totalEntries: files.length, extractedEntries, skippedEntries, totalUncompressedBytes: declaredTotal, entries },
+    archive: { totalEntries: files.length, extractedEntries, skippedEntries, totalUncompressedBytes: files.reduce((sum, file) => sum + file.sizeBytes, 0), entries },
     warnings: skippedEntries ? [`${skippedEntries} arquivo(s) do ZIP não foram extraídos; consulte o relatório por item.`] : [],
   };
 }

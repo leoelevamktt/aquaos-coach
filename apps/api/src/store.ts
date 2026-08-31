@@ -91,7 +91,12 @@ export class DemoStore {
     this.syncJobs.push(job);
     const connector = createSimulatedConnector(provider);
     if (direction === "push") {
-      const workout = this.workouts.find((item) => item.status === "published")!;
+      const workout = this.workouts.find((item) => item.status === "published");
+      if (!workout) {
+        job.status = "failed";
+        job.error = "Nenhum treino publicado está disponível para sincronização.";
+        throw new Error(job.error);
+      }
       const result = await connector.pushWorkout(connection, workout, job.idempotencyKey);
       if (!result.ok) { job.status = "failed"; job.error = result.error; throw new Error(result.error); }
       job.status = "completed"; job.externalId = result.externalId; job.completedAt = now(); connection.lastSyncedAt = now();

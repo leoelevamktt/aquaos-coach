@@ -57,6 +57,8 @@ services:
       # CORS/cookie SameSite apontam para o domínio público (HTTPS)
       CORS_ORIGINS: ${CORS_ORIGINS:?defina em .env}
       STORAGE_PATH: /data/storage
+      BACKUP_PATH: /data/storage/backups
+      APP_BASE_URL: ${APP_BASE_URL:-https://natacao.elevamkt.digital}
       # Assistente IA (gateway substituível; vazio = assistente desativado)
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.elevamkt.digital/v1}

@@ -8,7 +8,7 @@ import {
   Plus, Search, SlidersHorizontal, Smartphone, Sparkles, Target, Trophy, Upload, UserPlus,
   UserRound, Users, Watch, Waves,
 } from "lucide-react";
-import { athletes, insights, meets as demoMeets, practices, strengthLibrary, workoutLibrary, zoneDistribution, type AthleteProfile } from "./demo-data";
+import { athletes, hydrateAthlete, insights, meets as demoMeets, practices, strengthLibrary, workoutLibrary, zoneDistribution, type AthleteProfile } from "./demo-data";
 import { Avatar, formatNumber, Metric, PageTitle, ProgressRing, SectionHead, StatusDot } from "./components";
 import { API_URL, apiRequest, importFile } from "./api";
 import { csvRow, downloadFile } from "./client-utils";
@@ -20,7 +20,7 @@ import { WorkoutTemplateEditor, type WorkoutSeed } from "./workout-library-actio
 
 export type AppView = "today" | "athletes" | "practices" | "seasons" | "videos" | "analytics" | "rkf" | "inbox" | "integrations" | "settings";
 
-export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate: () => void; onNavigate: (view: AppView) => void; onAthlete: (id: string) => void; onNotify: (message: string) => void }) {
+export function Today({ onCreate, onNavigate, onAthlete, onNotify, liveVersion = 0 }: { onCreate: () => void; onNavigate: (view: AppView) => void; onAthlete: (id: string) => void; onNotify: (message: string) => void; liveVersion?: number }) {
   // Data e saudação ao vivo (cliente, evita mismatch de hidratação)
   const [today, setToday] = useState<{ kicker: string; greeting: string } | null>(null);
   // Atletas reais da API; contagem sempre consistente com a lista exibida
@@ -37,15 +37,7 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate:
     setToday({ kicker: `${weekday} · ${dateLabel}`, greeting: hour < 12 ? "Bom dia, Leonardo." : hour < 18 ? "Boa tarde, Leonardo." : "Boa noite, Leonardo." });
     void apiRequest<{ data: Array<Record<string, unknown>> }>("/api/v1/athletes")
       .then((response) => {
-        const normalizeKey = (value: unknown) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^ath-/, "").replace(/[^a-z0-9]/g, "");
-        const live = (response.data ?? []).map((record) => {
-          const nameFromApi = String(record.name ?? "");
-          const fallback = athletes.find((demo) => normalizeKey(demo.id) === normalizeKey(record.id) || normalizeKey(demo.name) === normalizeKey(nameFromApi));
-          const base = fallback ?? athletes[0];
-          const name = nameFromApi || base.name;
-          const initials = name.split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase();
-          return { ...base, id: String(record.id), name, initials, group: String(record.group ?? base.group) };
-        });
+        const live = (response.data ?? []).map(hydrateAthlete);
         if (live.length) setRoster(live);
         else if (process.env.NODE_ENV !== "production") setRoster(athletes);
       })
@@ -62,7 +54,7 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate:
     void apiRequest<{ data: Array<Record<string, unknown>> }>("/api/v1/manage/videos")
       .then((response) => setVideoSummary({ total: response.data.length, pending: response.data.filter((video) => String(video.status ?? "").toLowerCase() !== "reviewed").length }))
       .catch(() => setVideoSummary({ total: 0, pending: 0 }));
-  }, []);
+  }, [liveVersion]);
 
   const displayAthletes = roster ?? [];
   const visibleCount = Math.min(displayAthletes.length, 4);
@@ -133,25 +125,35 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify }: { onCreate:
   </>;
 }
 
-export function Team({ onInvite, onAthlete, onNotify }: { onInvite: () => void; onAthlete: (id: string) => void; onNotify: (message: string) => void }) {
+export function Team({ onInvite, onAthlete, onNotify, liveVersion = 0 }: { onInvite: () => void; onAthlete: (id: string) => void; onNotify: (message: string) => void; liveVersion?: number }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("Todos");
+  const [roster, setRoster] = useState<AthleteProfile[]>(athletes);
   const importInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    void apiRequest<{ data: Array<Record<string, unknown>> }>("/api/v1/manage/athletes")
+      .then((response) => setRoster(response.data.map(hydrateAthlete)))
+      .catch(() => setRoster(athletes));
+  }, [liveVersion]);
   const handleImport = async (file?: File) => { if (!file) return; try { const result = await importFile(file, "athletes"); onNotify(`${result.imported} atleta(s) importado(s) com sucesso.`); } catch (error) { onNotify(error instanceof Error ? error.message : "Falha na importação"); } };
-  const list = athletes.filter((athlete) => {
+  const activeRoster = roster.filter((athlete) => athlete.account === "active");
+  const readinessValues = activeRoster.flatMap((athlete) => typeof athlete.readiness === "number" ? [athlete.readiness] : []);
+  const sleepValues = activeRoster.flatMap((athlete) => typeof athlete.sleep === "number" ? [athlete.sleep] : []);
+  const volume = activeRoster.reduce((sum, athlete) => sum + athlete.weeklyDistance, 0);
+  const list = roster.filter((athlete) => {
     const matchesSearch = `${athlete.name} ${athlete.handle} ${athlete.group}`.toLowerCase().includes(query.toLowerCase());
     const matchesFilter = filter === "Todos" || (filter === "Com índice" && Boolean(athlete.goalEvent)) || (filter === "Atenção" && (athlete.readiness ?? 0) < 65) || (filter === "Sem conta" && athlete.account !== "active");
     return matchesSearch && matchesFilter;
   });
   return <>
     <PageTitle kicker="EQUIPE" title="Plantel e prontuários" subtitle="Acompanhe performance, recuperação, objetivos e evolução individual.">
-      <input ref={importInput} hidden type="file" accept=".csv,.json" onChange={(event) => void handleImport(event.target.files?.[0])} /><button className="secondary-button" onClick={() => importInput.current?.click()}><Upload size={17} />Importar</button><button className="primary-button" onClick={onInvite}><UserPlus size={17} />Convidar atleta</button>
+      <input ref={importInput} hidden type="file" accept=".csv,.json,.xlsx,.zip" onChange={(event) => void handleImport(event.target.files?.[0])} /><button className="secondary-button" onClick={() => importInput.current?.click()}><Upload size={17} />Importar</button><button className="primary-button" onClick={onInvite}><UserPlus size={17} />Convidar atleta</button>
     </PageTitle>
-    <div className="metric-grid team-metrics"><Metric label="ATLETAS ATIVOS" value="6" detail="2 grupos · 1 sem conta" icon={Users} /><Metric label="READINESS" value="72" detail="Mediana da equipe hoje" icon={HeartPulse} tone="violet" /><Metric label="SONO" value="7h05" detail="Média móvel de 7 dias" icon={Moon} tone="blue" /><Metric label="VOLUME" value="148,9 km" detail="Meta semanal: 155 km" icon={Waves} tone="orange" /></div>
+    <div className="metric-grid team-metrics"><Metric label="ATLETAS ATIVOS" value={String(activeRoster.length)} detail={`${roster.length - activeRoster.length} sem acesso ativo`} icon={Users} /><Metric label="READINESS" value={readinessValues.length ? String(Math.round(readinessValues.reduce((sum, value) => sum + value, 0) / readinessValues.length)) : "—"} detail={readinessValues.length ? `${readinessValues.filter((value) => value >= 70).length} prontos · ${readinessValues.filter((value) => value < 70).length} em atenção` : "Sem dados de corpo"} icon={HeartPulse} tone="violet" /><Metric label="SONO" value={sleepValues.length ? `${(sleepValues.reduce((sum, value) => sum + value, 0) / sleepValues.length).toFixed(1).replace(".", ",")} h` : "—"} detail="Média dos atletas com wearable" icon={Moon} tone="blue" /><Metric label="VOLUME" value={`${(volume / 1000).toFixed(1).replace(".", ",")} km`} detail="Semana atual · dados sincronizados" icon={Waves} tone="orange" /></div>
     <section className="card roster-card">
       <div className="roster-toolbar"><div className="local-search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nome ou @usuário" /></div><div className="filter-pills">{["Todos", "Com índice", "Atenção", "Sem conta"].map((item) => <button className={filter === item ? "active" : ""} key={item} onClick={() => setFilter(item)}>{item}</button>)}</div><button className="icon-button" aria-label="Aplicar filtro de atenção" onClick={() => { setFilter("Atenção"); onNotify("Filtro de risco aplicado: readiness abaixo de 65."); }}><SlidersHorizontal size={18} /></button></div>
       <div className="roster-head"><span>ATLETA</span><span>OBJETIVO</span><span>READINESS</span><span>SEMANA</span><span>PRESENÇA</span><span /></div>
-      <div className="roster-list">{list.map((athlete) => <button className="athlete-row" key={athlete.id} onClick={() => onAthlete(athlete.id)}>
+       <div className="roster-list">{list.map((athlete) => <button className="athlete-row" data-athlete-id={athlete.id} key={athlete.id} onClick={() => onAthlete(athlete.id)}>
         <span className="athlete-person"><Avatar initials={athlete.initials} color={athlete.color} /><span><b>{athlete.name}</b><small>{athlete.handle} · {athlete.group}</small></span>{athlete.account !== "active" && <i>{athlete.account === "invited" ? "Convite pendente" : "Sem conta"}</i>}</span>
         <span>{athlete.goalEvent ? <><b>{athlete.goalEvent}</b><small>{athlete.bestTime} → {athlete.goalTime}</small></> : <><b className="muted">Sem meta</b><small>Cadastre um objetivo</small></>}</span>
         <span>{athlete.readiness ? <><ProgressRing value={athlete.readiness} size="small" /><small>{athlete.lastBodySync}</small></> : <><StatusDot tone="muted" /><small>Sem wearable</small></>}</span>
@@ -165,6 +167,19 @@ export function Team({ onInvite, onAthlete, onNotify }: { onInvite: () => void; 
 export function AthleteDetail({ athlete, onBack, onCreate, onNavigate, onNotify }: { athlete: (typeof athletes)[number]; onBack: () => void; onCreate: () => void; onNavigate: (view: AppView) => void; onNotify: (message: string) => void }) {
   const [panel, setPanel] = useState<AthletePanel>(null);
   const [goal, setGoal] = useState(() => initialGoalFor(athlete));
+  useEffect(() => {
+    void apiRequest<{ data: Array<Record<string, unknown>> }>(`/api/v1/manage/goals?q=${encodeURIComponent(athlete.id)}`)
+      .then((response) => {
+        const record = response.data.find((item) => item.athleteId === athlete.id);
+        if (!record) return;
+        setGoal({
+          event: String(record.event ?? ""), course: String(record.course ?? "Piscina 50 m"),
+          currentTime: String(record.currentTime ?? ""), targetTime: String(record.targetTime ?? ""),
+          meet: String(record.meet ?? ""), deadline: String(record.deadline ?? ""),
+          priority: String(record.priority ?? "A"), gap: String(record.gap ?? "A calcular"),
+        });
+      }).catch(() => undefined);
+  }, [athlete.id]);
   const pacing = calculateGoalPacing(athlete, goal);
   const exportPerformance = () => {
     exportAthletePerformance(athlete, goal);
@@ -240,9 +255,13 @@ export function Practices({ onCreate, onNotify, refreshToken = 0 }: { onCreate: 
   </>;
 }
 
-function WeekCalendar({ onCreate, published }: { onCreate: (seed?: WorkoutSeed) => void; published: PublishedWorkoutRecord[] }) {
+function LegacyWeekCalendar({ onCreate, published }: { onCreate: (seed?: WorkoutSeed) => void; published: PublishedWorkoutRecord[] }) {
   const [weekOffset, setWeekOffset] = useState(0);
-  const base = Date.UTC(2026, 7, 24 + weekOffset * 7, 12);
+  const currentDate = new Date();
+  const monday = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth(), currentDate.getUTCDate(), 12));
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7) + weekOffset * 7);
+  const base = monday.getTime();
+  const todayIso = currentDate.toISOString().slice(0, 10);
   const names = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"];
   const months = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
   const dates = Array.from({ length: 7 }, (_, index) => new Date(base + index * 86_400_000));
@@ -256,6 +275,31 @@ function WeekCalendar({ onCreate, published }: { onCreate: (seed?: WorkoutSeed) 
   const weekLabel = `${String(first.getUTCDate()).padStart(2, "0")} ${first.getUTCMonth() !== last.getUTCMonth() ? `de ${months[first.getUTCMonth()]} ` : ""}- ${String(last.getUTCDate()).padStart(2, "0")} de ${months[last.getUTCMonth()]} de ${last.getUTCFullYear()}`;
   const totalLoad = days.reduce((sum, day) => sum + day.load, 0);
   return <section className="card calendar-card"><div className="calendar-toolbar"><div><button className="icon-button" aria-label="Semana anterior" onClick={() => setWeekOffset((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Próxima semana" onClick={() => setWeekOffset((value) => value + 1)}><ChevronRight size={18} /></button><button className="secondary-button small" onClick={() => setWeekOffset(0)}>Esta semana</button></div><strong>{weekLabel}</strong><div className="week-load"><Sparkles size={15} />Carga prevista <b>{formatNumber(totalLoad)}</b></div></div><div className="week-grid">{days.map((item) => <div className={`day-column ${item.iso === "2026-08-29" ? "today" : ""}`} key={item.iso}><div className="day-head"><span>{item.day}</span><b>{item.date}</b><small>{item.load ? `${item.load} u.a.` : "Descanso"}</small></div><div className="day-content">{item.sessions.length ? item.sessions.map((practice) => <button className={`practice-card ${practice.type}`} key={practice.id} onClick={() => onCreate({ title: practice.title, prompt: `${practice.title}\n${practice.distance ? `${practice.distance} m` : "Sessão de força"}\n${practice.group}`, distanceMeters: practice.distance, zone: practice.zone, kind: practice.type === "strength" ? "strength" : "swim" })}><span><i />{practice.time}</span><strong>{practice.title}</strong><small>{practice.distance ? `${formatNumber(practice.distance)} m` : "55 min"} · {practice.group}</small><div><span className={`zone-tag ${practice.zone.toLowerCase()}`}>{practice.zone}</span><em>{practice.status === "published" ? <><CircleCheck size={12} />Publicado</> : "Rascunho"}</em></div></button>) : <button className="empty-day" onClick={() => onCreate()}><Plus size={17} />Planejar o dia</button>}</div></div>)}</div><div className="calendar-footer"><div><span><i className="swim-dot" />Natação</span><span><i className="strength-dot" />Força</span><span><i className="draft-dot" />Rascunho</span></div><p><Sparkles size={14} />Carga calculada pelo RkfLoadEngine V5.1</p></div></section>;
+}
+
+function WeekCalendar({ onCreate, published }: { onCreate: (seed?: WorkoutSeed) => void; published: PublishedWorkoutRecord[] }) {
+  const [weekOffset, setWeekOffset] = useState(0);
+  const current = new Date();
+  const monday = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate(), 12));
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7) + weekOffset * 7);
+  const names = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"];
+  const monthNames = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+  const todayIso = current.toISOString().slice(0, 10);
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(monday.getTime() + index * 86_400_000);
+    const iso = date.toISOString().slice(0, 10);
+    const synced = published.filter((record) => record.date === iso).map((record) => ({ id: record.id, title: record.title ?? "Treino publicado", distance: Number(record.distanceMeters ?? 0), zone: record.zone ?? "A1", type: record.kind === "strength" ? "strength" as const : "swim" as const, time: record.scheduledAt?.slice(11, 16) ?? "08:00", status: "published" as const, group: record.target ?? "Equipe inteira" }));
+    const sessions = [...practices.filter((practice) => practice.date === iso).map((practice) => ({ id: practice.id, title: practice.title, distance: practice.distance, zone: practice.zone, type: practice.type === "strength" ? "strength" as const : "swim" as const, time: practice.time, status: practice.status as "published" | "draft", group: practice.group })), ...synced];
+    return { iso, day: names[date.getUTCDay()], date: String(date.getUTCDate()).padStart(2, "0"), month: monthNames[date.getUTCMonth()], sessions, load: Math.round(sessions.reduce((sum, session) => sum + session.distance, 0) / 8) };
+  });
+  const first = days[0]; const last = days[6];
+  const weekLabel = `${first.date} ${first.month === last.month ? "" : `de ${first.month} `}- ${last.date} de ${last.month} de ${new Date(monday).getUTCFullYear()}`;
+  const totalLoad = days.reduce((sum, day) => sum + day.load, 0);
+  return <section className="card calendar-card">
+    <div className="calendar-toolbar"><div><button className="icon-button" aria-label="Semana anterior" onClick={() => setWeekOffset((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Próxima semana" onClick={() => setWeekOffset((value) => value + 1)}><ChevronRight size={18} /></button><button className="secondary-button small" onClick={() => setWeekOffset(0)}>Esta semana</button></div><strong>{weekLabel}</strong><div className="week-load"><Sparkles size={15} />Carga prevista <b>{formatNumber(totalLoad)}</b></div></div>
+    <div className="week-grid">{days.map((day) => <div className={`day-column ${day.iso === todayIso ? "today" : ""}`} key={day.iso}><div className="day-head"><span>{day.day}</span><b>{day.date}</b><small>{day.load ? `${day.load} u.a.` : "Descanso"}</small></div><div className="day-content">{day.sessions.length ? day.sessions.map((session) => <button className={`practice-card ${session.type}`} key={session.id} onClick={() => onCreate({ id: session.id, title: session.title, prompt: `${session.title}\n${session.distance ? `${session.distance} m` : "Sessão de força"}\n${session.group}`, distanceMeters: session.distance, zone: session.zone, kind: session.type })}><span><i />{session.time}</span><strong>{session.title}</strong><small>{session.distance ? `${formatNumber(session.distance)} m` : "55 min"} · {session.group}</small><div><span className={`zone-tag ${session.zone.toLowerCase()}`}>{session.zone}</span><em>{session.status === "published" ? <><CircleCheck size={12} />Publicado</> : "Rascunho"}</em></div></button>) : <button className="empty-day" onClick={() => onCreate()}><Plus size={17} />Planejar o dia</button>}</div></div>)}</div>
+    <div className="calendar-footer"><div><span><i className="swim-dot" />Natação</span><span><i className="strength-dot" />Força</span><span><i className="draft-dot" />Rascunho</span></div><p><Sparkles size={13} />Cargas estimadas pelo RkfLoadEngine</p></div>
+  </section>;
 }
 
 function LibraryView({ kind, records, onUse, onEdit }: { kind: "swim" | "strength"; records: PublishedWorkoutRecord[]; onUse: (seed: WorkoutSeed) => void; onEdit: (initial?: WorkoutSeed) => void }) {

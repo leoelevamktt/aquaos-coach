@@ -6,6 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "RKF Coach",
     description: "Planejamento, prescrição e acompanhamento para natação de alto rendimento.",
     start_url: "/pt/coach/today",
+    scope: "/",
     display: "standalone",
     background_color: "#f3f6fa",
     theme_color: "#0b1e3f",

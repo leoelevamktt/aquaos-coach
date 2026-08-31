@@ -8,6 +8,7 @@ import { ManagedStore } from "./managed-store.js";
 import { registerOperationalRoutes } from "./operational-routes.js";
 import { login } from "./auth.js";
 import JSZip from "jszip";
+import ExcelJS from "exceljs";
 
 const root = mkdtempSync(join(tmpdir(), "rkf-operational-"));
 const store = new ManagedStore(join(root, "store.json"));
@@ -63,5 +64,26 @@ describe("uploads e importações operacionais", () => {
       extraction: { format: "zip", archive: { totalEntries: 1, extractedEntries: 1 } },
     });
     await app.inject({ method: "DELETE", url: `/api/v1/manage/documents/${response.json().id}`, headers: { cookie } });
+  });
+
+  it("importa XLSX diretamente e ZIP com CSV sem perder a origem da aba/arquivo", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Atletas");
+    sheet.addRow(["name", "status"]); sheet.addRow(["Nadador XLSX", "active"]);
+    const xlsx = Buffer.from(await workbook.xlsx.writeBuffer());
+    const direct = await app.inject({ method: "POST", url: "/api/v1/import/athletes", ...form("atletas.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsx) });
+    expect(direct.statusCode).toBe(201);
+    expect(direct.json()).toMatchObject({ imported: 1, records: [{ name: "Nadador XLSX", __sheet: "Atletas", organizationId: "org-demo" }] });
+
+    const zip = new JSZip();
+    zip.file("dados/atletas.csv", "name,status\nNadador ZIP,active");
+    zip.file("dados/notas.txt", "origem=zip");
+    const zipped = await app.inject({ method: "POST", url: "/api/v1/import/athletes", ...form("atletas.zip", "application/zip", await zip.generateAsync({ type: "nodebuffer" })) });
+    expect(zipped.statusCode).toBe(201);
+    expect(zipped.json()).toMatchObject({ imported: 2, archive: { importedFiles: 2 } });
+    expect(zipped.json().records).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "Nadador ZIP", archiveSource: "dados/atletas.csv" }),
+      expect.objectContaining({ name: "notas.txt", archiveSource: "dados/notas.txt" }),
+    ]));
   });
 });

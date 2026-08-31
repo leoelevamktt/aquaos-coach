@@ -6,6 +6,8 @@ import ffprobe from "ffprobe-static";
 const execute = promisify(execFile);
 const executable = ffmpegPath as unknown as string | null;
 
+export type AnalysisProgress = (progress: number, stage: string) => void | Promise<void>;
+
 type ProbeOutput = {
   streams?: { codec_type?: string; width?: number; height?: number; r_frame_rate?: string }[];
   format?: { duration?: string; size?: string; bit_rate?: string };
@@ -16,13 +18,15 @@ function ratio(value = "0/1") {
   return b ? a / b : a;
 }
 
-export async function analyzeVideo(filePath: string, thumbnailPath?: string) {
+export async function analyzeVideo(filePath: string, thumbnailPath?: string, onProgress?: AnalysisProgress) {
   if (!executable) throw new Error("FFmpeg não está disponível neste ambiente.");
+  await onProgress?.(5, "Lendo metadados do vídeo");
   const { stdout: probeText } = await execute(ffprobe.path, ["-v", "error", "-show_entries", "format=duration,size,bit_rate:stream=codec_type,width,height,r_frame_rate", "-of", "json", filePath], { maxBuffer: 10 * 1024 * 1024 });
   const probe = JSON.parse(probeText) as ProbeOutput;
   const video = probe.streams?.find((stream) => stream.codec_type === "video");
   const duration = Number(probe.format?.duration ?? 0);
 
+  await onProgress?.(18, "Extraindo movimento quadro a quadro");
   const { stderr } = await execute(executable, ["-hide_banner", "-i", filePath, "-an", "-vf", "fps=8,tblend=all_mode=difference,signalstats,metadata=print", "-f", "null", process.platform === "win32" ? "NUL" : "/dev/null"], { maxBuffer: 30 * 1024 * 1024 });
   const lines = stderr.split(/\r?\n/);
   const raw: { time: number; value: number }[] = [];
@@ -65,7 +69,12 @@ export async function analyzeVideo(filePath: string, thumbnailPath?: string) {
     { id: "phase-exit", time: duration * .9, category: "finish", label: "Saída do campo de análise", confidence: 90 },
   ].map((event) => ({ ...event, time: Math.round(event.time * 1000) / 1000 }));
 
-  if (thumbnailPath) await execute(executable, ["-y", "-ss", String(Math.max(.5, duration * .45)), "-i", filePath, "-frames:v", "1", "-vf", "scale='min(960,iw)':-2", thumbnailPath], { maxBuffer: 10 * 1024 * 1024 });
+  await onProgress?.(78, "Calculando ciclos e consistência técnica");
+  if (thumbnailPath) {
+    await onProgress?.(88, "Gerando quadro de referência");
+    await execute(executable, ["-y", "-ss", String(Math.max(.5, duration * .45)), "-i", filePath, "-frames:v", "1", "-vf", "scale='min(960,iw)':-2", thumbnailPath], { maxBuffer: 10 * 1024 * 1024 });
+  }
+  await onProgress?.(100, "Análise concluída");
 
   return {
     engine: "AquaMotion",

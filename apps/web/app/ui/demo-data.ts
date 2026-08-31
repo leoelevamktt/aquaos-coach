@@ -92,6 +92,44 @@ export const athletes: AthleteProfile[] = [
   },
 ];
 
+export function hydrateAthlete(record: Record<string, unknown>): AthleteProfile {
+  const normalize = (value: unknown) => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const id = String(record.id ?? "athlete");
+  const name = String(record.name ?? "Atleta sem nome");
+  const fallback = athletes.find((athlete) => normalize(athlete.id) === normalize(id) || normalize(athlete.name) === normalize(name));
+  const initials = name.split(" ").map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "AN";
+  const numeric = (key: string, fallbackValue: number) => typeof record[key] === "number" && Number.isFinite(record[key]) ? Number(record[key]) : fallbackValue;
+  const status = String(record.status ?? "active");
+  const birthDate = typeof record.birthDate === "string" ? new Date(record.birthDate) : undefined;
+  const calculatedAge = birthDate && !Number.isNaN(birthDate.getTime()) ? Math.max(0, Math.floor((Date.now() - birthDate.getTime()) / 31_557_600_000)) : 0;
+  return {
+    id,
+    name,
+    handle: String(record.handle ?? fallback?.handle ?? `@${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`),
+    initials,
+    color: String(record.color ?? record.avatarColor ?? fallback?.color ?? "#397ac4"),
+    age: numeric("age", fallback?.age ?? calculatedAge),
+    stroke: String(record.stroke ?? fallback?.stroke ?? "Natação"),
+    group: String(record.group ?? fallback?.group ?? "Sem grupo"),
+    account: status === "active" ? "active" : status === "invited" ? "invited" : "offline",
+    ...(typeof record.readiness === "number" || fallback?.readiness !== undefined ? { readiness: numeric("readiness", fallback?.readiness ?? 0) } : {}),
+    ...(typeof record.sleep === "number" || fallback?.sleep !== undefined ? { sleep: numeric("sleep", fallback?.sleep ?? 0) } : {}),
+    ...(typeof record.recovery === "number" || fallback?.recovery !== undefined ? { recovery: numeric("recovery", fallback?.recovery ?? 0) } : {}),
+    ...(typeof record.hrv === "number" || fallback?.hrv !== undefined ? { hrv: numeric("hrv", fallback?.hrv ?? 0) } : {}),
+    ...(typeof record.restingHr === "number" || fallback?.restingHr !== undefined ? { restingHr: numeric("restingHr", fallback?.restingHr ?? 0) } : {}),
+    weeklyDistance: numeric("weeklyDistance", fallback?.weeklyDistance ?? 0),
+    previousDistance: numeric("previousDistance", fallback?.previousDistance ?? 0),
+    attendance: numeric("attendance", fallback?.attendance ?? 0),
+    ...(record.goalEvent || fallback?.goalEvent ? { goalEvent: String(record.goalEvent ?? fallback?.goalEvent) } : {}),
+    ...(record.goalTime || fallback?.goalTime ? { goalTime: String(record.goalTime ?? fallback?.goalTime) } : {}),
+    ...(record.bestTime || fallback?.bestTime ? { bestTime: String(record.bestTime ?? fallback?.bestTime) } : {}),
+    ...(record.gap || fallback?.gap ? { gap: String(record.gap ?? fallback?.gap) } : {}),
+    ...(record.wearable || fallback?.wearable ? { wearable: String(record.wearable ?? fallback?.wearable) } : {}),
+    ...(record.lastBodySync || fallback?.lastBodySync ? { lastBodySync: String(record.lastBodySync ?? fallback?.lastBodySync) } : {}),
+    skills: Array.isArray(record.skills) ? record.skills.filter((skill): skill is { key: string; label: string; score: number; trend: number } => Boolean(skill) && typeof skill === "object" && typeof (skill as { key?: unknown }).key === "string").map((skill) => ({ key: skill.key, label: skill.label, score: Number(skill.score ?? 0), trend: Number(skill.trend ?? 0) })) : (fallback?.skills ?? []),
+  };
+}
+
 export const practices = [
   { id: "p1", date: "2026-08-28", day: "SEX", title: "Ritmo de prova · 200 Livre", distance: 5200, zone: "AN2", type: "swim", time: "07:30", status: "published", group: "Equipe inteira", rpe: 7 },
   { id: "p2", date: "2026-08-28", day: "SEX", title: "Força máxima · membros inferiores", distance: 0, zone: "FORÇA", type: "strength", time: "16:00", status: "published", group: "Elite", rpe: 8 },

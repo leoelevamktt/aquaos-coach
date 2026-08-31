@@ -56,8 +56,9 @@ describe("catálogo de eventos de domínio (G08)", () => {
 describe("migrations versionadas (G05)", () => {
   it("declara rollback para todas as migrations", () => {
     expect(MIGRATIONS.length).toBeGreaterThan(0);
+    expect(MIGRATIONS.slice(6)).toHaveLength(25);
     for (const migration of MIGRATIONS) {
-      expect(migration.id).toMatch(/^000\d_/);
+      expect(migration.id).toMatch(/^\d{4}_/);
       expect(migration.down).toBeTruthy();
       expect(migration.description).toBeTruthy();
     }
@@ -151,10 +152,19 @@ describe("LGPD: portabilidade e anonimização", () => {
 });
 
 describe("backup lógico (evidência de recuperação)", () => {
-  it("rejeita backup sem driver PostgreSQL em vez de fingir sucesso", async () => {
+  it("cria, verifica e lista backup no driver arquivo sem fingir Postgres", async () => {
     const response = await app.inject({ method: "POST", url: "/api/v1/backup", headers: { cookie: coachCookie }, payload: {} });
-    expect([503, 500]).toContain(response.statusCode);
-    expect(response.json().error).toBeTruthy();
+    expect(response.statusCode).toBe(201);
+    const backup = response.json();
+    expect(backup).toMatchObject({ id: expect.stringMatching(/^backup-/), checksum: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    const verified = await app.inject({ method: "GET", url: `/api/v1/backup/${backup.id}/verify`, headers: { cookie: coachCookie } });
+    expect(verified.statusCode).toBe(200);
+    expect(verified.json()).toMatchObject({ valid: true, checksum: backup.checksum });
+    const listed = await app.inject({ method: "GET", url: "/api/v1/backup", headers: { cookie: coachCookie } });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().backups).toEqual(expect.arrayContaining([expect.objectContaining({ id: backup.id, valid: true })]));
+    const dryRun = await app.inject({ method: "POST", url: `/api/v1/backup/${backup.id}/restore`, headers: { cookie: coachCookie }, payload: { apply: false } });
+    expect(dryRun.statusCode).toBe(403);
   });
 
   it("atleta não cria backup", async () => {

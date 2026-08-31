@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { athletes, meets, videos, zoneDistribution } from "./demo-data";
 import { Avatar, ModalShell } from "./components";
-import { apiRequest, mediaUrl, uploadFile } from "./api";
+import { apiRequest, mediaUrl, subscribeToLiveEvents, uploadFile } from "./api";
 import type { WorkoutSeed } from "./workout-library-actions";
 
 type SyncProvider = "garmin" | "polar" | "apple";
@@ -20,15 +20,15 @@ const syncProviders: Array<{ id: SyncProvider; name: string; detail: string; pus
 ];
 
 const syncAthletes = [
-  { id: "ath-ana", name: "Ana Souza" },
-  { id: "ath-caio", name: "Caio Martins" },
-  { id: "ath-luiza", name: "Luiza Costa" },
-  { id: "ath-pedro", name: "Pedro Lima" },
+  { id: "ana-souza", name: "Ana Souza" },
+  { id: "caio-martins", name: "Caio Martins" },
+  { id: "luiza-costa", name: "Luiza Costa" },
+  { id: "pedro-lima", name: "Pedro Lima" },
 ];
 
 export function ConnectionDialog({ initialProvider = "garmin", onClose, onSave }: { initialProvider?: SyncProvider; onClose: () => void; onSave: (message: string) => void }) {
   const [provider, setProvider] = useState<SyncProvider>(initialProvider);
-  const [athleteId, setAthleteId] = useState("ath-ana");
+  const [athleteId, setAthleteId] = useState("ana-souza");
   const [direction, setDirection] = useState<"push" | "pull">("pull");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState("");
@@ -99,7 +99,8 @@ export function WorkoutComposer({ seed, onClose, onSave }: { seed?: WorkoutSeed;
   const publish = async () => {
     setPublishing(true); setError("");
     try {
-      const record = await apiRequest<Record<string, unknown>>("/api/v1/manage/workouts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: title.trim(), date: dateTime.slice(0, 10), scheduledAt: dateTime, distanceMeters: seed?.distanceMeters ?? 5200, zone: seed?.zone ?? "AN2", kind: seed?.kind ?? "swim", target, pool, note, status: "published", source: "coach-publish", publishedAt: new Date().toISOString(), prescriptionText: prompt, attachment: attachment || undefined }) });
+      const assignment = target === "Equipe inteira" ? { targetType: "team", targetId: "org-demo" } : target === "Ana Souza" ? { targetType: "athlete", targetId: "ana-souza" } : { targetType: "group", targetId: target.startsWith("Elite") ? "elite" : target.startsWith("Desenvolvimento") ? "desenvolvimento" : target.toLowerCase().replace(/[^a-z0-9]+/g, "-") };
+      const record = await apiRequest<Record<string, unknown>>("/api/v1/manage/workouts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: title.trim(), date: dateTime.slice(0, 10), scheduledAt: dateTime, distanceMeters: seed?.distanceMeters ?? 5200, zone: seed?.zone ?? "AN2", kind: seed?.kind ?? "swim", target, targetType: assignment.targetType, targetId: assignment.targetId, pool, note, status: "published", source: "coach-publish", publishedAt: new Date().toISOString(), prescriptionText: prompt, attachment: attachment || undefined }) });
       onSave(record);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível publicar o treino."); }
     finally { setPublishing(false); }
@@ -111,13 +112,26 @@ export function WorkoutComposer({ seed, onClose, onSave }: { seed?: WorkoutSeed;
     <footer className="modal-footer"><button className="secondary-button" onClick={step === 1 ? onClose : () => setStep(step - 1)}>{step === 1 ? "Cancelar" : "Voltar"}</button><button className="primary-button" disabled={publishing || (step === 1 && (!prompt.trim() || !title.trim()))} onClick={step === 3 ? () => void publish() : () => setStep(step + 1)}>{step === 1 ? <><Sparkles size={16} />Estruturar treino</> : step === 2 ? "Continuar" : <><Send size={16} />{publishing ? "Publicando" : "Publicar e sincronizar"}</>}</button></footer></ModalShell>;
 }
 
-export function InviteModal({ onClose, onSave }: { onClose: () => void; onSave: () => void }) {
+export function InviteModal({ onClose, onSave }: { onClose: () => void; onSave: (invitationUrl?: string) => void }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [group, setGroup] = useState("Elite · Raia 4");
   const [saving, setSaving] = useState(false);
-  const save = async () => { if (!name || !email) return; setSaving(true); try { await apiRequest("/api/v1/manage/athletes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, group, status: "invited", invitedAt: new Date().toISOString() }) }); onSave(); } finally { setSaving(false); } };
-  return <ModalShell title="Convidar atleta" subtitle="Crie acesso individual e defina o grupo inicial" onClose={onClose}><div className="modal-form"><label><span>Nome completo</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Nome do atleta" /></label><label><span>E-mail</span><input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="atleta@email.com" /></label><label><span>Grupo</span><select value={group} onChange={(event) => setGroup(event.target.value)}><option>Elite · Raia 4</option><option>Desenvolvimento · Raia 3</option><option>Base · Raia 2</option><option>Águas abertas</option></select></label><div className="secure-note"><ShieldCheck size={18} /><p>O convite expira em 7 dias e pode ser revogado. O consentimento de dados de saúde é solicitado separadamente.</p></div></div><footer className="modal-footer"><button className="secondary-button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={saving || !name || !email} onClick={() => void save()}><Send size={16} />{saving ? "Criando…" : "Criar convite"}</button></footer></ModalShell>;
+  const [error, setError] = useState("");
+  const [invitationUrl, setInvitationUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+  const save = async () => {
+    if (!name || !email) return;
+    setSaving(true); setError("");
+    try {
+      const result = await apiRequest<{ invitation?: { url?: string } }>("/api/v1/manage/athletes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, group, status: "invited", invitedAt: new Date().toISOString() }) });
+      setInvitationUrl(result.invitation?.url ?? "");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível criar o convite.");
+    } finally { setSaving(false); }
+  };
+  const copyInvitation = async () => { try { await navigator.clipboard.writeText(invitationUrl); setCopied(true); } catch { setCopied(false); } };
+  return <ModalShell title="Convidar atleta" subtitle="Crie acesso individual e defina o grupo inicial" onClose={onClose}>{invitationUrl ? <><div className="invite-success"><CircleCheck size={30} /><h3>Convite criado</h3><p>Envie este link ao atleta. Ele expira em 7 dias e só pode ser utilizado uma vez.</p><div className="copy-field"><input readOnly value={invitationUrl} aria-label="Link do convite" /><button onClick={() => void copyInvitation()}>{copied ? "Copiado" : "Copiar"}</button></div></div><footer className="modal-footer"><button className="primary-button" onClick={() => { onSave(invitationUrl); onClose(); }}>Concluir</button></footer></> : <><div className="modal-form"><label><span>Nome completo</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Nome do atleta" /></label><label><span>E-mail</span><input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="atleta@email.com" /></label><label><span>Grupo</span><select value={group} onChange={(event) => setGroup(event.target.value)}><option>Elite · Raia 4</option><option>Desenvolvimento · Raia 3</option><option>Base · Raia 2</option><option>Águas abertas</option></select></label><div className="secure-note"><ShieldCheck size={18} /><p>O convite expira em 7 dias e pode ser revogado. O consentimento de dados de saúde é solicitado separadamente.</p></div>{error && <p className="modal-error" role="alert">{error}</p>}</div><footer className="modal-footer"><button className="secondary-button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={saving || !name || !email} onClick={() => void save()}><Send size={16} />{saving ? "Criando…" : "Criar convite"}</button></footer></>}</ModalShell>;
 }
 
 type MotionAnalysis = {
@@ -129,7 +143,7 @@ type MotionAnalysis = {
   timeline: { time: number; motion: number }[];
   events: { id: string; time: number; category: string; label: string; confidence: number; note?: string }[];
 };
-type ManagedVideo = { id: string; title?: string; athlete?: string; event?: string; url?: string; thumbnailUrl?: string; durationSeconds?: number; analysisStatus?: string; analysis?: MotionAnalysis; manualEvents?: MotionAnalysis["events"] };
+type ManagedVideo = { id: string; title?: string; athlete?: string; event?: string; url?: string; thumbnailUrl?: string; durationSeconds?: number; analysisStatus?: string; analysisProgress?: number; analysisStage?: string; analysisError?: string; analysisJobId?: string; analysis?: MotionAnalysis; manualEvents?: MotionAnalysis["events"] };
 const clock = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${Math.floor(seconds % 60).toString().padStart(2, "0")}.${Math.floor((seconds % 1) * 10)}`;
 
 export function VideoReview({ videoId, onClose, onSave }: { videoId: string; onClose: () => void; onSave: () => void }) {
@@ -140,17 +154,36 @@ export function VideoReview({ videoId, onClose, onSave }: { videoId: string; onC
   const [duration, setDuration] = useState(Number("duration" in fallback ? fallback.duration.split(":").reduce((total, part) => total * 60 + Number(part), 0) : 0));
   const [playing, setPlaying] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [processing, setProcessing] = useState(true);
   const markers = ["Entrada", "Velocidade", "Virada", "Ritmo", "Chegada"];
+  const applyRemote = (remote: ManagedVideo) => {
+    setRecord(remote);
+    const nextDuration = remote.analysis?.metadata.durationSeconds ?? remote.durationSeconds;
+    if (nextDuration && Number.isFinite(nextDuration)) setDuration(nextDuration);
+    setProcessing(["pending", "queued", "processing"].includes(String(remote.analysisStatus)));
+  };
+  const refresh = async () => {
+    const remote = await apiRequest<ManagedVideo>(`/api/v1/manage/videos/${videoId}`);
+    applyRemote(remote);
+    return remote;
+  };
   const load = async () => {
     try {
-      let remote = await apiRequest<ManagedVideo>(`/api/v1/manage/videos/${videoId}`);
-      if (remote.analysisStatus !== "ready") remote = await apiRequest<ManagedVideo>(`/api/v1/videos/${videoId}/analyze`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-      setRecord(remote); setDuration(remote.analysis?.metadata.durationSeconds ?? remote.durationSeconds ?? duration);
+      const remote = await refresh();
+      if (remote.analysisStatus !== "ready" && remote.analysisStatus !== "processing" && remote.analysisStatus !== "queued") {
+        applyRemote(await apiRequest<ManagedVideo>(`/api/v1/videos/${videoId}/analyze`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }));
+      }
     } catch { /* vídeos antigos permanecem disponíveis como demonstração */ }
-    finally { setProcessing(false); }
   };
   useEffect(() => { void load(); }, [videoId]);
+  useEffect(() => subscribeToLiveEvents((event) => {
+    const belongsToVideo = (event.resource === "videos" && event.resourceId === videoId)
+      || (event.resource === "videoAnalysisJobs" && event.record?.videoId === videoId);
+    if (!belongsToVideo) return;
+    if (event.resource === "videos" && event.record) applyRemote(event.record as ManagedVideo);
+    else void refresh().catch(() => undefined);
+  }), [videoId]);
   const analysis = record.analysis;
   const sample = analysis?.timeline.reduce((best, item) => Math.abs(item.time - currentTime) < Math.abs(best.time - currentTime) ? item : best, analysis.timeline[0] ?? { time: 0, motion: 0 });
   const allEvents = [...(analysis?.events ?? []), ...(record.manualEvents ?? [])].sort((a, b) => a.time - b.time);
@@ -164,16 +197,21 @@ export function VideoReview({ videoId, onClose, onSave }: { videoId: string; onC
     try { const updated = await apiRequest<ManagedVideo>(`/api/v1/videos/${videoId}/events`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); setRecord(updated); } catch { setRecord((value) => ({ ...value, manualEvents: [...(value.manualEvents ?? []), { id: `local-${Date.now()}`, ...body, confidence: 100 }] })); }
   };
   const save = async () => {
-    try { await apiRequest(`/api/v1/manage/videos/${videoId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "reviewed", feedback, reviewedAt: new Date().toISOString() }) }); } catch { /* mantém feedback da sessão quando offline */ }
-    onSave();
+    setSaveError("");
+    try {
+      await apiRequest(`/api/v1/manage/videos/${videoId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "reviewed", feedback, reviewedAt: new Date().toISOString() }) });
+      onSave();
+    } catch (cause) {
+      setSaveError(cause instanceof Error ? cause.message : "Não foi possível salvar a revisão.");
+    }
   };
   return <ModalShell title={`${record.athlete ?? fallback.athlete} · ${record.event ?? record.title ?? fallback.event}`} subtitle={`Análise sincronizada · ${analysis?.engine ?? "AquaMotion"} ${analysis?.engineVersion ?? ""}`} onClose={onClose} wide>
-    <div className="live-analysis-banner"><span className={processing ? "processing" : "live"}><i />{processing ? "PROCESSANDO VÍDEO" : "ANÁLISE ATIVA"}</span><p>{analysis?.methodology ?? "Carregando metadados e curva de movimento…"}</p><em>{analysis ? `${analysis.metadata.width}×${analysis.metadata.height} · ${analysis.metadata.fps} fps` : ""}</em></div>
+     <div className="live-analysis-banner"><span className={processing ? "processing" : record.analysisStatus === "failed" ? "failed" : "live"}><i />{processing ? `PROCESSANDO VÍDEO · ${record.analysisProgress ?? 0}%` : record.analysisStatus === "failed" ? "ANÁLISE INTERROMPIDA" : "ANÁLISE ATIVA"}</span><p>{record.analysisStage ?? analysis?.methodology ?? "Carregando metadados e curva de movimento…"}</p><em>{analysis ? `${analysis.metadata.width}×${analysis.metadata.height} · ${analysis.metadata.fps} fps` : record.analysisError ?? ""}</em></div>
     <div className="review-layout real-review"><div><div className="review-player"><div className="real-video-stage"><video ref={player} src={mediaUrl(record.url)} poster={mediaUrl(record.thumbnailUrl)} playsInline preload="metadata" onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} /><button className="video-play-control" onClick={() => void toggle()}>{playing ? <Pause size={23} fill="currentColor" /> : <Play size={23} fill="currentColor" />}</button><span className="player-time">{clock(currentTime)} / {clock(duration)}</span><span className="active-phase">{activeEvent?.label ?? "Aguardando fase técnica"}</span></div><div className="timeline live-timeline" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); seek(((event.clientX - rect.left) / rect.width) * duration); }}><i style={{ width: `${duration ? currentTime / duration * 100 : 0}%` }} />{allEvents.map((event, index) => <em key={event.id} title={`${event.label} · ${clock(event.time)}`} style={{ left: `${duration ? event.time / duration * 100 : 0}%`, background: zoneDistribution[index % zoneDistribution.length].color }} />)}</div></div>
       <div className="live-metrics"><div><span>MOVIMENTO AGORA</span><b>{sample?.motion ?? 0}<small>/100</small></b><i style={{ width: `${sample?.motion ?? 0}%` }} /></div><div><span>CADÊNCIA ESTIMADA</span><b>{liveCadence}<small> ciclos/min</small></b><em>{analysis ? "janela temporal" : "-"}</em></div><div><span>CICLOS DETECTADOS</span><b>{detectedNow}<small> / {analysis?.metrics.detectedCycles ?? 0}</small></b><em>até este quadro</em></div><div><span>ÍNDICE TÉCNICO</span><b>{analysis?.metrics.technicalIndex ?? 0}<small>/100</small></b><em>{analysis?.metrics.rhythmConsistency ?? 0}% consistência</em></div></div>
       <div className="marker-buttons">{markers.map((marker, index) => <button key={marker} onClick={() => void addMarker(marker, index)}><span style={{ background: zoneDistribution[index].color }}>{marker[0]}</span>{marker}<Plus size={14} /></button>)}</div><label className="review-note"><span>Feedback para o atleta</span><textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Registre a evidência técnica e a próxima ação…" /></label></div>
       <aside className="review-sidebar"><span className="eyebrow">LINHA DO TEMPO · {allEvents.length} EVENTOS</span>{allEvents.slice(0, 14).map((event, index) => <button className={`analysis-event ${Math.abs(event.time - currentTime) < .5 ? "active" : ""}`} key={event.id} onClick={() => seek(event.time)}><span style={{ background: zoneDistribution[index % zoneDistribution.length].color }}>{event.category === "stroke" ? "C" : event.label[0]}</span><div><b>{event.label}</b><small>{clock(event.time)} · {event.confidence}% confiança</small><p>{event.category === "stroke" ? "Pico de movimento detectado no ciclo." : "Fase sugerida para validação técnica."}</p></div></button>)}</aside></div>
-    <footer className="modal-footer"><div className="analysis-summary"><Sparkles size={15} /><span><b>{analysis?.metrics.detectedCycles ?? 0} ciclos</b> · cadência {analysis?.metrics.estimatedCadence ?? 0}/min · consistência {analysis?.metrics.rhythmConsistency ?? 0}%</span></div><button className="secondary-button" onClick={onClose}>Fechar</button><button className="primary-button" onClick={() => void save()}><Check size={16} />Salvar revisão</button></footer>
+     {saveError && <p className="modal-error review-save-error" role="alert">{saveError}</p>}<footer className="modal-footer"><div className="analysis-summary"><Sparkles size={15} /><span><b>{analysis?.metrics.detectedCycles ?? 0} ciclos</b> · cadência {analysis?.metrics.estimatedCadence ?? 0}/min · consistência {analysis?.metrics.rhythmConsistency ?? 0}%</span></div><button className="secondary-button" onClick={onClose}>Fechar</button><button className="primary-button" onClick={() => void save()}><Check size={16} />Salvar revisão</button></footer>
   </ModalShell>;
 }
 
@@ -192,11 +230,18 @@ const MEET_STANDARDS = [
 ];
 
 export function MeetDetail({ meetId, onClose, onNotify }: { meetId: string; onClose: () => void; onNotify: (message: string) => void }) {
-  const meet = meets.find((item) => item.id === meetId) ?? meets[0];
+  const fallbackMeet = meets.find((item) => item.id === meetId) ?? meets[0];
+  const [meetRecord, setMeetRecord] = useState<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    setMeetRecord(null);
+    void apiRequest<Record<string, unknown>>(`/api/v1/manage/meets/${meetId}`).then(setMeetRecord).catch(() => undefined);
+  }, [meetId]);
+  const startsOn = typeof meetRecord?.startsOn === "string" ? meetRecord.startsOn : "";
+  const meet = meetRecord ? { ...fallbackMeet, id: String(meetRecord.id ?? meetId), name: String(meetRecord.name ?? fallbackMeet.name), priority: String(meetRecord.priority ?? fallbackMeet.priority) as "A" | "B" | "C", date: startsOn ? new Date(`${startsOn}T12:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", "").toUpperCase() : fallbackMeet.date, days: startsOn ? Math.max(0, Math.round((new Date(`${startsOn}T12:00:00`).getTime() - Date.now()) / 86_400_000)) : fallbackMeet.days, location: String(meetRecord.location ?? fallbackMeet.location), pool: String(meetRecord.pool ?? fallbackMeet.pool), qualified: Number(meetRecord.qualified ?? fallbackMeet.qualified), entries: Number(meetRecord.entries ?? fallbackMeet.entries) } : fallbackMeet;
   const [tab, setTab] = useState("Equipe");
   const docsInput = useRef<HTMLInputElement>(null);
-  const attachDocument = async (file?: File) => { if (!file) return; try { await uploadFile(file, "documents", { title: `${meet.name} · ${file.name}` }); onNotify("Documento anexado à competição."); } catch (error) { onNotify(error instanceof Error ? error.message : "Falha no documento"); } };
-  const saveMeet = async () => { try { await apiRequest("/api/v1/manage/meets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: meet.name, priority: meet.priority, location: meet.location, pool: meet.pool, status: "planned", entries: meet.entries, qualified: meet.qualified }) }); onNotify("Alterações da competição salvas e auditadas."); } catch (error) { onNotify(error instanceof Error ? error.message : "Falha ao salvar competição"); } };
+  const attachDocument = async (file?: File) => { if (!file) return; try { await uploadFile(file, "documents", { title: `${meet.name} · ${file.name}`, referenceType: "meet", referenceId: meet.id }); onNotify("Documento anexado à competição."); } catch (error) { onNotify(error instanceof Error ? error.message : "Falha no documento"); } };
+  const saveMeet = async () => { try { await apiRequest(`/api/v1/manage/meets/${meet.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: meet.name, priority: meet.priority, startsOn: startsOn || undefined, location: meet.location, pool: meet.pool, status: "planned", entries: meet.entries, qualified: meet.qualified }) }); onNotify("Alterações da competição salvas e auditadas."); } catch (error) { onNotify(error instanceof Error ? error.message : "Falha ao salvar competição"); } };
   return <ModalShell title={meet.name} subtitle={`${meet.date} · ${meet.location} · ${meet.pool}`} onClose={onClose} wide><div className="meet-modal-head"><span className={`meet-priority p${meet.priority.toLowerCase()}`}>{meet.priority}</span><div><b>Em {meet.days} dias</b><small>{meet.qualified} atletas com índice · {meet.entries} inscrições</small></div><button className="secondary-button" onClick={() => onNotify("Modo deck preparado para uso offline.")}><Smartphone size={16} />Abrir modo deck</button></div><div className="tab-bar modal-tabs">{["Equipe", "Programação", "Índices", "Provas"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</div><div className="meet-tab-content">{tab === "Equipe" && <div className="meet-athletes">{athletes.slice(0, 4).map((athlete, index) => <div key={athlete.id}><Avatar initials={athlete.initials} color={athlete.color} small /><span><b>{athlete.name}</b><small>{athlete.goalEvent ?? "A definir"}</small></span><span className="qualified"><CircleCheck size={14} />{index < 3 ? "Com índice" : "Convidado"}</span><strong>{index + 2} provas</strong></div>)}</div>}{tab === "Programação" && <div className="meet-schedule">{[{ t: "07:00", n: "Chegada da equipe", k: "Operação" }, { t: "07:20", n: "Aquecimento na água", k: "Treino" }, { t: "08:45", n: "Abertura oficial", k: "Evento" }, { t: "09:00", n: "Início das eliminatórias", k: "Provas" }, { t: "17:00", n: "Sessão de finais", k: "Provas" }].map((item) => <div key={item.t}><strong>{item.t}</strong><i /><span><b>{item.n}</b><small>{item.k}</small></span></div>)}</div>}{tab === "Índices" && <div className="standards-table"><div><span>PROVA</span><span>FEM · 50 M</span><span>MASC · 50 M</span><span>ATLETAS</span></div>{MEET_STANDARDS.map((standard) => <div key={standard.event}><b>{standard.event}</b><span>{standard.fem}</span><span>{standard.masc}</span><strong>{standard.athletes}</strong></div>)}</div>}{tab === "Provas" && <div className="entries-grid">{athletes.slice(0, 4).map((athlete) => <article key={athlete.id}><div><Avatar initials={athlete.initials} color={athlete.color} small /><b>{athlete.name}</b></div><span>{athlete.goalEvent ?? "100 m Livre"}</span><small>Balizamento pendente</small></article>)}</div>}</div><footer className="modal-footer"><input ref={docsInput} hidden type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,image/*" onChange={(event) => void attachDocument(event.target.files?.[0])} /><button className="secondary-button" onClick={() => docsInput.current?.click()}><Upload size={16} />Documentos</button><button className="primary-button" onClick={() => void saveMeet()}>Salvar competição</button></footer></ModalShell>;
 }
 

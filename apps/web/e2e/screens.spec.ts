@@ -16,8 +16,42 @@ const screens = [
   { id: "training-register", path: "/pt/athlete/home", probe: /treino|hoje|sess/i },
 ];
 
+const base = process.env.FRONTEND_URL ?? "http://localhost:3000";
+const local = base.includes("localhost");
+const coachEmail = process.env.COACH_EMAIL ?? (local ? "coach@natacao.local" : "treinador@elevamkt.digital");
+const coachPassword = process.env.COACH_PASSWORD ?? (local ? "natacao-demo" : undefined);
+const athleteEmail = process.env.ATHLETE_EMAIL ?? (local ? "ana@natacao.local" : "atleta@elevamkt.digital");
+const athletePassword = process.env.ATHLETE_PASSWORD ?? (local ? "natacao-demo" : undefined);
+
+async function loginCoach(page: import("@playwright/test").Page) {
+  await page.goto("/pt/coach/today", { waitUntil: "domcontentloaded" });
+  const email = page.getByRole("textbox", { name: "E-mail" });
+  if (await email.waitFor({ state: "visible", timeout: 20_000 }).then(() => true).catch(() => false)) {
+    if (!coachPassword) throw new Error("COACH_PASSWORD é obrigatório para testar telas protegidas.");
+    await page.waitForLoadState("networkidle");
+    await email.fill(coachEmail);
+    await page.getByRole("textbox", { name: "Senha" }).fill(coachPassword);
+    await page.getByRole("button", { name: /entrar/i }).click();
+  }
+  await expect(page.locator("body")).toContainText(/Bom dia|Boa tarde|Boa noite/, { timeout: 30_000 });
+}
+
+async function loginAthlete(page: import("@playwright/test").Page) {
+  await page.goto("/pt/athlete/login", { waitUntil: "domcontentloaded" });
+  if (!athletePassword) throw new Error("ATHLETE_PASSWORD é obrigatório para testar telas protegidas.");
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("textbox", { name: "E-mail ou CPF" }).fill(athleteEmail);
+  await page.getByRole("textbox", { name: "Senha" }).fill(athletePassword);
+  await page.getByRole("button", { name: /^Entrar$/ }).click();
+  await expect(page).toHaveURL(/\/pt\/athlete\/checkin/);
+  await page.getByRole("button", { name: "Iniciar meu dia" }).click();
+  await expect(page).toHaveURL(/\/pt\/athlete\/home/);
+}
+
 for (const screen of screens) {
   test(`G23: tela ${screen.id} renderiza (@${screen.path})`, async ({ page }) => {
+    if (screen.path.startsWith("/pt/coach/")) await loginCoach(page);
+    if (screen.path === "/pt/athlete/home") await loginAthlete(page);
     const response = await page.goto(screen.path, { waitUntil: "domcontentloaded" });
     expect(response?.status()).toBeLessThan(400);
     // Aguarda hidratação/autolog demo e procura o conteúdo característico

@@ -21,10 +21,18 @@ export default defineConfig({
   ],
   webServer: process.env.FRONTEND_URL
     ? undefined
-    : {
-        command: "npm run dev -w @natacao/web",
-        url: "http://localhost:3000",
-        reuseExistingServer: true,
-        timeout: 120_000,
-      },
+    : [
+        {
+          command: "npm run dev -w @natacao/api",
+          url: "http://localhost:4000/api/v1/health",
+          reuseExistingServer: true,
+          timeout: 120_000,
+        },
+        {
+          command: "npm run dev -w @natacao/web",
+          url: "http://localhost:3000",
+          reuseExistingServer: true,
+          timeout: 120_000,
+        },
+      ],
 });

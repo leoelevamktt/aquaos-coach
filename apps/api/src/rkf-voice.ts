@@ -12,6 +12,8 @@
  */
 
 import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import type { ManagedStore } from "./managed-store.js";
 import { parseTrainingText } from "./rkf-parser.js";
 
@@ -131,14 +133,22 @@ export type VoiceIngestionRecord = {
 export type SpeechToTextProvider = (audio: Buffer, mime: string) => Promise<{ text: string; confidence: number } | null>;
 
 /** Cria o registro de voz em LOCAL com hash do áudio original. */
-export function createVoiceIngestion(store: ManagedStore, input: { audio: Buffer; filename: string; mime: string; organizationId: string; actorId: string; title: string }) {
+export function createVoiceIngestion(store: ManagedStore, input: { audio: Buffer; filename: string; mime: string; organizationId: string; actorId: string; title: string; storageRoot?: string }) {
   const audioHash = createHash("sha256").update(input.audio).digest("hex");
+  const safeName = basename(input.filename).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]+/g, "-").toLowerCase();
+  const storedFilename = `${Date.now()}-${safeName || "voice-audio"}`;
+  if (input.storageRoot) {
+    mkdirSync(input.storageRoot, { recursive: true });
+    writeFileSync(resolve(input.storageRoot, storedFilename), input.audio, { flag: "wx" });
+  }
   return store.create("ingestions", {
     title: input.title,
     channel: "VOICE",
     sourceName: input.filename,
     original: `audio:${input.filename}:${input.audio.length} bytes`,
     originalHash: audioHash,
+    audioFilename: input.storageRoot ? storedFilename : undefined,
+    audioUrl: input.storageRoot ? `/uploads/${storedFilename}` : undefined,
     audioMime: input.mime,
     voiceState: "LOCAL" as VoiceState,
     transcript: null,

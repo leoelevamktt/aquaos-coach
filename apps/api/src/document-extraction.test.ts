@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
-import { extractDocument, signatureMatches } from "./document-extraction.js";
+import { extractDocument, extractSpreadsheetRows, readSafeArchiveEntries, signatureMatches } from "./document-extraction.js";
 
 describe("extração documental", () => {
   it("extrai texto e CSV com campos entre aspas", async () => {
@@ -20,6 +20,19 @@ describe("extração documental", () => {
     expect(extracted).toMatchObject({ status: "extracted", format: "xlsx", sheets: [{ name: "Carga", rows: 2 }] });
     expect(signatureMatches(Buffer.from("%PDF-1.7"), ".pdf")).toBe(true);
     expect(signatureMatches(Buffer.from("arquivo falso"), ".pdf")).toBe(false);
+  });
+
+  it("converte todas as linhas de abas XLSX em registros auditáveis", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const first = workbook.addWorksheet("Sessões");
+    first.addRow(["Título", "Volume (m)", "Volume (m)"]); first.addRow(["Base A2", 5800, 5800]);
+    const second = workbook.addWorksheet("Metadados");
+    second.addRow(["Chave", "Valor"]); second.addRow(["versão", "V5.1"]);
+    const rows = await extractSpreadsheetRows(Buffer.from(await workbook.xlsx.writeBuffer()));
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ __sheet: "Sessões", titulo: "Base A2", volume_m: 5800, volume_m_2: 5800 }),
+      expect.objectContaining({ __sheet: "Metadados", chave: "versão", valor: "V5.1" }),
+    ]));
   });
 
   it("não promete OCR quando o pacote de idioma não está homologado", async () => {
@@ -57,5 +70,14 @@ describe("extração documental", () => {
     const result = await extractDocument(bombBuffer, "suspeito.zip");
     expect(result).toMatchObject({ status: "failed", format: "zip" });
     expect(result.error).toContain("razão de compressão");
+  });
+
+  it("expõe apenas entradas seguras para o importador genérico", async () => {
+    const zip = new JSZip();
+    zip.file("sessions.csv", "title,volume\nA2,5800");
+    const entries = await readSafeArchiveEntries(await zip.generateAsync({ type: "nodebuffer" }));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ path: "sessions.csv", extension: ".csv", sizeBytes: expect.any(Number) });
+    expect(entries[0].content.toString()).toContain("A2");
   });
 });

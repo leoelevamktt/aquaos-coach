@@ -10,7 +10,8 @@
     "dev": "concurrently \"npm run dev -w @natacao/api\" \"npm run dev -w @natacao/web\"",
     "build": "npm run build -w @natacao/domain && npm run build -w @natacao/api && npm run build -w @natacao/web",
     "test": "npm run test -w @natacao/domain && npm run test -w @natacao/api && npm run test -w @natacao/web",
-    "typecheck": "npm run typecheck -w @natacao/domain && npm run typecheck -w @natacao/api && npm run typecheck -w @natacao/web"
+    "typecheck": "npm run typecheck -w @natacao/domain && npm run typecheck -w @natacao/api && npm run typecheck -w @natacao/web",
+    "test:e2e": "npm run test:e2e -w @natacao/web"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

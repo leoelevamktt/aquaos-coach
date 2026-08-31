@@ -12,7 +12,14 @@ import {
 import { apiRequest } from "./api";
 
 type AthleteScreen = "welcome" | "access" | "login" | "onboarding" | "checkin" | "home" | "session" | "results" | "checkout" | "week" | "competitions" | "competition-result" | "more";
-type OnboardingProfile = { fullName:string; birthDate:string; sex:string; category:string; events:string[]; otherEvent:string; level:string; club:string; targetMeet:string; meetDate:string; primaryEvent:string; secondaryEvent:string; objective:string; medicalAccepted:boolean; responsibilityAccepted:boolean };
+type OnboardingProfile = { fullName:string; email:string; password:string; birthDate:string; sex:string; category:string; events:string[]; otherEvent:string; level:string; club:string; targetMeet:string; meetDate:string; primaryEvent:string; secondaryEvent:string; objective:string; medicalAccepted:boolean; responsibilityAccepted:boolean };
+const defaultOnboardingProfile: OnboardingProfile = { fullName:"Ana Souza", email:"", password:"", birthDate:"2002-04-18", sex:"Feminino", category:"Absoluto", events:["200L","400L"], otherEvent:"", level:"Seleção nacional", club:"", targetMeet:"Campeonato Brasileiro", meetDate:"2026-09-20", primaryEvent:"400 Livre", secondaryEvent:"200 Livre", objective:"Índice internacional", medicalAccepted:true, responsibilityAccepted:true };
+const onboardingDraftKey = "rkf_onboarding_draft";
+function readOnboardingDraft(): { profile?: OnboardingProfile; sessions?: number; days?: string[]; periods?: string[] } | null {
+  if (typeof window === "undefined") return null;
+  try { return JSON.parse(window.sessionStorage.getItem(onboardingDraftKey) ?? "null") as { profile?: OnboardingProfile; sessions?: number; days?: string[]; periods?: string[] } | null; }
+  catch { return null; }
+}
 
 const sessionBlocks = [
   { code: "AQ", tone: "blue", title: "Aquecimento", volume: "1.000 m", detail: "400 livre A1 · 200 educativo · 200 MI técnico · 4x50 progressivos" },
@@ -85,14 +92,25 @@ export default function AthleteApp() {
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const [sessions, setSessions] = useState(8);
-  const [days, setDays] = useState(["SEG", "TER", "QUA", "QUI", "SEX"]);
-  const [periods, setPeriods] = useState(["Manhã", "Tarde"]);
+  const [sessions, setSessions] = useState(() => readOnboardingDraft()?.sessions ?? 8);
+  const [days, setDays] = useState(() => readOnboardingDraft()?.days ?? ["SEG", "TER", "QUA", "QUI", "SEX"]);
+  const [periods, setPeriods] = useState(() => readOnboardingDraft()?.periods ?? ["Manhã", "Tarde"]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authState, setAuthState] = useState<"checking" | "signed-out" | "signed-in" | "denied">("checking");
-  const [onboardingProfile, setOnboardingProfile] = useState<OnboardingProfile>({ fullName:"Ana Souza", birthDate:"2002-04-18", sex:"Feminino", category:"Absoluto", events:["200L","400L"], otherEvent:"", level:"Seleção nacional", club:"", targetMeet:"Campeonato Brasileiro", meetDate:"2026-09-20", primaryEvent:"400 Livre", secondaryEvent:"200 Livre", objective:"Índice internacional", medicalAccepted:true, responsibilityAccepted:true });
-  const go = (next: AthleteScreen, step?: number) => router.push(routeFor(next, step));
+  const [athleteId, setAthleteId] = useState("ana-souza");
+  const [athleteName, setAthleteName] = useState("Ana Souza");
+  const [onboardingProfile, setOnboardingProfile] = useState<OnboardingProfile>(() => readOnboardingDraft()?.profile ?? defaultOnboardingProfile);
+  const [inviteToken, setInviteToken] = useState(() => typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("invite") ?? "" : "");
+  const go = (next: AthleteScreen, step?: number) => {
+    const target = routeFor(next, step);
+    router.push(inviteToken && next === "onboarding" ? `${target}?invite=${encodeURIComponent(inviteToken)}` : target);
+  };
+  const athleteFirstName = athleteName.trim().split(/\s+/)[0] || "Atleta";
+  useEffect(() => {
+    if (screen !== "onboarding" || typeof window === "undefined") return;
+    window.sessionStorage.setItem(onboardingDraftKey, JSON.stringify({ profile: onboardingProfile, sessions, days, periods }));
+  }, [screen, onboardingProfile, sessions, days, periods]);
 
   // Gate de autenticação: telas internas exigem sessão válida do atleta.
   // Telas públicas: welcome, access, login, onboarding (primeiro acesso).
@@ -100,12 +118,12 @@ export default function AthleteApp() {
   useEffect(() => {
     if (publicScreens.includes(screen)) return;
     let cancelled = false;
-    const roleFrom = (payload: unknown) => {
-      const withUser = payload as { user?: { role?: string }; role?: string };
-      return withUser?.user?.role ?? withUser?.role;
+    const sessionFrom = (payload: unknown) => {
+      const withUser = payload as { user?: { role?: string; athleteId?: string; name?: string }; role?: string; athleteId?: string; name?: string };
+      return { role: withUser?.user?.role ?? withUser?.role, athleteId: withUser?.user?.athleteId ?? withUser?.athleteId, name: withUser?.user?.name ?? withUser?.name };
     };
     void apiRequest("/api/v1/auth/me")
-      .then((payload) => { if (!cancelled) setAuthState(roleFrom(payload) === "athlete" ? "signed-in" : "denied"); })
+      .then((payload) => { if (!cancelled) { const session = sessionFrom(payload); setAthleteId(session.athleteId ?? "ana-souza"); if (session.name) setAthleteName(session.name); setAuthState(session.role === "athlete" ? "signed-in" : "denied"); } })
       .catch(() => {
         if (cancelled) return;
         if (process.env.NODE_ENV !== "production") {
@@ -137,32 +155,36 @@ export default function AthleteApp() {
       const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
       const json = (body: Record<string, unknown>) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const completedBody = {
-        athleteId: "ath-ana", startedAt: new Date(now.getTime() - 6_000_000).toISOString(), endedAt: now.toISOString(),
+        athleteId, startedAt: new Date(now.getTime() - 6_000_000).toISOString(), endedAt: now.toISOString(),
         distanceMeters: Math.max(1, Number(payload.volumeMeters ?? 6000)), durationSeconds: 6000, completedSteps: 8, totalSteps: 8,
-        rpe: Number(payload.pse ?? 6), source: "manual", externalId: `manual-ana-${localDate}`, rawPayload: payload,
+        rpe: Number(payload.pse ?? 6), source: "manual", externalId: String(payload.externalId ?? `manual-${athleteId}-${localDate}-session`), rawPayload: payload,
       };
       if (type === "wellness") {
         const note = [String(payload.notes ?? "Check-in registrado pelo atleta"), Array.isArray(payload.feelings) && payload.feelings.length ? `Sinais: ${payload.feelings.join(", ")}` : ""].filter(Boolean).join(" | ");
         await apiRequest("/api/v1/wellness", json({
-          athleteId: "ath-ana", date: localDate,
+          athleteId, date: localDate,
           fatigue: Math.max(0, 10 - Number(payload.psr ?? payload.pse ?? 8)),
           soreness: Number(payload.pain ?? 0), pain: Number(payload.pain ?? 0), note,
         }));
         if (payload.status === "checkout") {
           await apiRequest("/api/v1/completed-workouts", json(completedBody));
-          await apiRequest("/api/v1/manage/activities", json({ type: "athlete-checkout", athleteId: "ana-souza", athlete: "Ana Souza", recordedAt: now.toISOString(), ...payload }));
+          await apiRequest("/api/v1/manage/activities", json({ type: "athlete-checkout", athleteId, athlete: athleteName, recordedAt: now.toISOString(), ...payload }));
         }
       } else if (type === "completed-workout") {
         await apiRequest("/api/v1/completed-workouts", json(completedBody));
         const seconds = (value: unknown) => { const [minutes, rest] = String(value ?? "0:00").split(":").map(Number); return Math.max(1, minutes * 60 + rest); };
         const average = seconds(payload.average); const best = seconds(payload.best); const last = seconds(payload.last);
         const repetitions = Array.from({ length: 12 }, (_, index) => ({ repetition: index + 1, distanceM: 200, timeSeconds: index === 0 ? best : index === 11 ? last : average, stroke: "livre", splits: [] }));
-        await apiRequest("/api/v1/rkf/results/sessions", json({ athleteId: "ana-souza", date: localDate, event: "200 m Livre", poolLengthM: 50, sessionDistanceM: 6000, capturedDistanceM: 2400, durationMinutes: 100, pse: Number(payload.pse ?? 6), expectedPse: 6, prescribedVolumeM: 6000, sets: [{ set: 1, label: String(payload.series ?? "12x200 A2"), zone: "A2", repetitions }], notes: String(payload.notes ?? "") }));
+        await apiRequest("/api/v1/rkf/results/sessions", json({ athleteId, date: localDate, event: "200 m Livre", poolLengthM: 50, sessionDistanceM: 6000, capturedDistanceM: 2400, durationMinutes: 100, pse: Number(payload.pse ?? 6), expectedPse: 6, prescribedVolumeM: 6000, stroke: "livre", mode: "nado", material: "sem_material", protocol: String(payload.series ?? "12x200-A2"), sets: [{ set: 1, label: String(payload.series ?? "12x200 A2"), zone: "A2", repetitions }], notes: String(payload.notes ?? "") }));
+      } else if (type === "race-result") {
+        const parts = String(payload.time ?? "0:00").split(":").map(Number);
+        const timeSeconds = Math.max(0.01, (parts.length > 1 ? parts[0] * 60 + parts[1] : parts[0]) || 0.01);
+        const distanceM = Math.max(25, Number(String(payload.event ?? "100").match(/\d+/)?.[0] ?? 100));
+        const stroke = String(payload.event ?? "").toLowerCase().includes("costas") ? "costas" : String(payload.event ?? "").toLowerCase().includes("peito") ? "peito" : String(payload.event ?? "").toLowerCase().includes("borboleta") ? "borboleta" : "livre";
+        await apiRequest("/api/v1/rkf/results/sessions", json({ athleteId, date: localDate, event: String(payload.event ?? `${distanceM} m Livre`), poolLengthM: 50, sessionDistanceM: distanceM, capturedDistanceM: distanceM, durationMinutes: Math.max(1, timeSeconds / 60), pse: 6, stroke, mode: "nado", material: "sem_material", protocol: "competition-official", sets: [{ set: 1, label: "Resultado oficial", repetitions: [{ repetition: 1, distanceM, timeSeconds, stroke, splits: [] }] }], notes: String(payload.notes ?? "") }));
+        await apiRequest("/api/v1/manage/activities", json({ type, athleteId, athlete: athleteName, recordedAt: now.toISOString(), ...payload, status: "official" }));
       } else {
-        await apiRequest("/api/v1/manage/activities", json({ type, athleteId: "ana-souza", athlete: "Ana Souza", recordedAt: now.toISOString(), ...payload }));
-      }
-      if (type === "completed-workout" || payload.status === "checkout") {
-        await apiRequest("/api/v1/manage/activities", json({ type: "rkf-load-session", athleteId: "ana-souza", athlete: "Ana Souza", date: localDate, pse: Number(payload.pse ?? 6), expectedPse: 6, durationMinutes: 100, prescribedVolumeM: 6000, executedVolumeM: Number(payload.volumeMeters ?? 6000), source: "athlete-confirmed", status: "confirmed" }));
+        await apiRequest("/api/v1/manage/activities", json({ type, athleteId, athlete: athleteName, recordedAt: now.toISOString(), ...payload }));
       }
       go(next);
     } catch (cause) { setFeedback(cause instanceof Error ? cause.message : "Não foi possível salvar."); }
@@ -180,23 +202,52 @@ export default function AthleteApp() {
   const login = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true); setFeedback("");
     try {
-      const response = await apiRequest<{ user?: { role?: string } }>("/api/v1/auth/login", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
+      const response = await apiRequest<{ user?: { role?: string; athleteId?: string; name?: string } }>("/api/v1/auth/login", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
       if (response?.user && response.user.role !== "athlete") {
         setFeedback("Esta conta é da comissão técnica. Use o painel do treinador.");
         return;
       }
+      setAthleteId(response.user?.athleteId ?? "ana-souza");
+      if (response.user?.name) setAthleteName(response.user.name);
+      const pendingOnboarding = typeof window !== "undefined" ? window.sessionStorage.getItem("rkf_pending_onboarding") : null;
+      if (pendingOnboarding) {
+        const profile = JSON.parse(pendingOnboarding) as Record<string, unknown>;
+        await apiRequest("/api/v1/athlete/profile", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profile) });
+        window.sessionStorage.removeItem("rkf_pending_onboarding");
+        window.sessionStorage.removeItem(onboardingDraftKey);
+      }
       go("checkin");
     } catch (cause) { setFeedback(cause instanceof Error ? cause.message : "Não foi possível entrar."); }
     finally { setSaving(false); }
+  };
+
+  const signOut = async () => {
+    setSaving(true); setFeedback("");
+    try { await apiRequest("/api/v1/auth/logout", { method: "POST" }); }
+    catch { /* a sessão já pode ter expirado; o cookie local ainda deve ser removido pelo próximo login */ }
+    finally { setAuthState("signed-out"); setEmail(""); setPassword(""); setSaving(false); router.replace("/pt/athlete/login"); }
   };
   const finishOnboarding = async () => {
     if (!onboardingProfile.medicalAccepted || !onboardingProfile.responsibilityAccepted) { setFeedback("Aceite os termos de saúde e responsabilidade para continuar."); return; }
     setSaving(true); setFeedback("");
     const payload = { name:onboardingProfile.fullName, birthDate:onboardingProfile.birthDate, sex:onboardingProfile.sex, category:onboardingProfile.category, events:onboardingProfile.events, otherEvent:onboardingProfile.otherEvent, level:onboardingProfile.level, club:onboardingProfile.club, targetMeet:onboardingProfile.targetMeet, meetDate:onboardingProfile.meetDate, primaryEvent:onboardingProfile.primaryEvent, secondaryEvent:onboardingProfile.secondaryEvent, objective:onboardingProfile.objective, availability:{ sessionsPerWeek:sessions, days, periods }, onboardingStatus:"completed", status:"active" };
     try {
-      await apiRequest("/api/v1/manage/athletes/ana-souza", { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
-      await apiRequest("/api/v1/manage/activities", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ type:"planning-created", athleteId:"ana-souza", athlete:onboardingProfile.fullName, plan:payload, status:"active" }) });
-      go("checkin");
+      if (inviteToken) {
+        if (!onboardingProfile.email.trim() || onboardingProfile.password.length < 8) { setFeedback("Informe o e-mail do convite e uma senha com ao menos 8 caracteres."); return; }
+        const accepted = await apiRequest<{ user?: { athleteId?: string } }>(`/api/v1/invitations/${inviteToken}/accept`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ password:onboardingProfile.password, name:onboardingProfile.fullName, profile:payload }) });
+        setAthleteId(accepted.user?.athleteId ?? "ana-souza");
+        setInviteToken("");
+        window.sessionStorage.removeItem(onboardingDraftKey);
+        go("checkin");
+      } else if (authState === "signed-in") {
+        await apiRequest("/api/v1/athlete/profile", { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+        await apiRequest("/api/v1/manage/activities", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ type:"planning-created", athleteId, athlete:onboardingProfile.fullName, plan:payload, status:"active" }) });
+        window.sessionStorage.removeItem(onboardingDraftKey);
+        go("checkin");
+      } else {
+        window.sessionStorage.setItem("rkf_pending_onboarding", JSON.stringify(payload));
+        go("login");
+      }
     } catch (cause) { setFeedback(cause instanceof Error ? cause.message : "Não foi possível criar o planejamento."); }
     finally { setSaving(false); }
   };
@@ -209,9 +260,9 @@ export default function AthleteApp() {
 
   if (screen === "onboarding") return <main className="athlete-phone light"><AppHeader onBack={() => onboardingStep > 1 ? go("onboarding", onboardingStep - 1) : go("access")} /><section className="athlete-onboarding"><div className="onboarding-progress">{[1,2,3,4,5,6].map((step) => <i className={step <= onboardingStep ? "active" : ""} key={step}>{step < onboardingStep ? <Check size={10} /> : step}</i>)}</div><OnboardingStep step={onboardingStep} sessions={sessions} setSessions={setSessions} days={days} setDays={setDays} periods={periods} setPeriods={setPeriods} profile={onboardingProfile} setProfile={setOnboardingProfile} />{feedback&&<p className="athlete-feedback">{feedback}</p>}<div className="onboarding-action">{onboardingStep < 6 ? <AthleteButton onClick={() => go("onboarding", onboardingStep + 1)}>Continuar</AthleteButton> : <AthleteButton disabled={saving} onClick={() => void finishOnboarding()}>{saving?"Criando planejamento...":"Criar meu planejamento"}</AthleteButton>}</div></section></main>;
 
-  if (screen === "checkin") return <main className="athlete-phone light"><AppHeader onBack={() => go("home")} /><form className="athlete-form checkin-form" onSubmit={(event) => { event.preventDefault(); void saveRecord("wellness", { psr, feelings, notes, status: "morning" }, "home"); }}><h1>Bom dia, Ana! <span>👋</span></h1><p>Como você acordou hoje?</p><section><b>PSR · Recuperação percebida</b><Rating value={psr} onChange={setPsr} /><div className="rating-legend"><span>Muito ruim</span><span>Excelente</span></div></section><section><b>Como você se sente? <small>(opcional)</small></b><div className="feeling-chips">{["Sono bom","Sono ruim","Corpo leve","Corpo pesado","Motivada","Cansada","Sem dor","Dor muscular"].map((item)=><button type="button" className={feelings.includes(item)?"active":""} key={item} onClick={()=>toggle(item,feelings,setFeelings)}>{item}</button>)}</div></section><AthleteButton secondary onClick={() => voice(setNotes)}><Mic size={18} />Falar por voz</AthleteButton><Field label="Observações (opcional)"><textarea value={notes} onChange={(event)=>setNotes(event.target.value)} maxLength={200} placeholder="Escreva ou fale sobre como você se sente..." /><small>{notes.length}/200</small></Field>{feedback && <p className="athlete-feedback">{feedback}</p>}<AthleteButton type="submit" disabled={saving}>{saving?"Salvando...":"Iniciar meu dia"}</AthleteButton></form></main>;
+  if (screen === "checkin") return <main className="athlete-phone light"><AppHeader onBack={() => go("home")} /><form className="athlete-form checkin-form" onSubmit={(event) => { event.preventDefault(); void saveRecord("wellness", { psr, feelings, notes, status: "morning" }, "home"); }}><h1>Bom dia, {athleteFirstName}! <span>👋</span></h1><p>Como você acordou hoje?</p><section><b>PSR · Recuperação percebida</b><Rating value={psr} onChange={setPsr} /><div className="rating-legend"><span>Muito ruim</span><span>Excelente</span></div></section><section><b>Como você se sente? <small>(opcional)</small></b><div className="feeling-chips">{["Sono bom","Sono ruim","Corpo leve","Corpo pesado","Motivada","Cansada","Sem dor","Dor muscular"].map((item)=><button type="button" className={feelings.includes(item)?"active":""} key={item} onClick={()=>toggle(item,feelings,setFeelings)}>{item}</button>)}</div></section><AthleteButton secondary onClick={() => voice(setNotes)}><Mic size={18} />Falar por voz</AthleteButton><Field label="Observações (opcional)"><textarea value={notes} onChange={(event)=>setNotes(event.target.value)} maxLength={200} placeholder="Escreva ou fale sobre como você se sente..." /><small>{notes.length}/200</small></Field>{feedback && <p className="athlete-feedback">{feedback}</p>}<AthleteButton type="submit" disabled={saving}>{saving?"Salvando...":"Iniciar meu dia"}</AthleteButton></form></main>;
 
-  return <main className="athlete-phone athlete-main-app"><AppHeader onBack={screen === "home" ? undefined : () => go("home")} title={screenTitle(screen)} /><div className="athlete-screen-content">{screen === "home" && <AthleteHome go={go} />}{screen === "session" && <AthleteSession go={go} voice={voice} feedback={feedback} />}{screen === "results" && <ResultsForm pse={pse} setPse={setPse} notes={notes} setNotes={setNotes} voice={voice} feedback={feedback} saving={saving} onSave={(payload)=>void saveRecord("completed-workout",payload,"home")} />}{screen === "checkout" && <Checkout pse={pse} setPse={setPse} notes={notes} setNotes={setNotes} voice={voice} feedback={feedback} saving={saving} onSave={(payload)=>void saveRecord("wellness",payload,"home")} />}{screen === "week" && <WeekView go={go} />}{screen === "competitions" && <Competitions go={go} />}{screen === "competition-result" && <CompetitionResult saving={saving} onSave={(payload)=>void saveRecord("race-result",payload,"competitions")} />}{screen === "more" && <MoreView go={go} />}</div><BottomNav active={screen} go={go} /></main>;
+  return <main className="athlete-phone athlete-main-app"><AppHeader onBack={screen === "home" ? undefined : () => go("home")} title={screenTitle(screen)} /><div className="athlete-screen-content">{screen === "home" && <AthleteHome go={go} />}{screen === "session" && <AthleteSession go={go} voice={voice} feedback={feedback} />}{screen === "results" && <ResultsForm pse={pse} setPse={setPse} notes={notes} setNotes={setNotes} voice={voice} feedback={feedback} saving={saving} onSave={(payload)=>void saveRecord("completed-workout",payload,"home")} />}{screen === "checkout" && <Checkout pse={pse} setPse={setPse} notes={notes} setNotes={setNotes} voice={voice} feedback={feedback} saving={saving} onSave={(payload)=>void saveRecord("wellness",payload,"home")} />}{screen === "week" && <WeekView go={go} />}{screen === "competitions" && <Competitions go={go} />}{screen === "competition-result" && <CompetitionResult saving={saving} onSave={(payload)=>void saveRecord("race-result",payload,"competitions")} />}{screen === "more" && <MoreView go={go} onSignOut={() => void signOut()} />}</div><BottomNav active={screen} go={go} /></main>;
 }
 
 function OnboardingStep({ step, sessions, setSessions, days, setDays, periods, setPeriods, profile, setProfile }: { step: number; sessions: number; setSessions: (value:number)=>void; days:string[]; setDays:(value:string[])=>void; periods:string[]; setPeriods:(value:string[])=>void; profile:OnboardingProfile; setProfile:(value:OnboardingProfile)=>void }) {
@@ -219,7 +270,7 @@ function OnboardingStep({ step, sessions, setSessions, days, setDays, periods, s
   const [title,subtitle]=headers[step-1];
   const update = <K extends keyof OnboardingProfile>(key:K,value:OnboardingProfile[K]) => setProfile({...profile,[key]:value});
   return <div className="onboarding-step"><h1>{title}</h1><p>{subtitle}</p>
-    {step===1&&<div className="athlete-form compact-form"><Field label="Nome completo"><input value={profile.fullName} onChange={event=>update("fullName",event.target.value)} /></Field><Field label="Data de nascimento"><input type="date" value={profile.birthDate} onChange={event=>update("birthDate",event.target.value)} /></Field><Field label="Sexo"><div className="segmented">{["Feminino","Masculino"].map(item=><button type="button" key={item} className={profile.sex===item?"active":""} onClick={()=>update("sex",item)}>{item}</button>)}</div></Field><Field label="Categoria atual"><select value={profile.category} onChange={event=>update("category",event.target.value)}><option>Absoluto</option><option>Júnior</option><option>Juvenil</option></select></Field></div>}
+     {step===1&&<div className="athlete-form compact-form"><Field label="Nome completo"><input value={profile.fullName} onChange={event=>update("fullName",event.target.value)} /></Field><Field label="E-mail de acesso (convite)"><input type="email" value={profile.email} onChange={event=>update("email",event.target.value)} placeholder="seu@email.com" /></Field><Field label="Senha de acesso (convite)"><input type="password" minLength={8} value={profile.password} onChange={event=>update("password",event.target.value)} placeholder="Mínimo de 8 caracteres" /></Field><Field label="Data de nascimento"><input type="date" value={profile.birthDate} onChange={event=>update("birthDate",event.target.value)} /></Field><Field label="Sexo"><div className="segmented">{["Feminino","Masculino"].map(item=><button type="button" key={item} className={profile.sex===item?"active":""} onClick={()=>update("sex",item)}>{item}</button>)}</div></Field><Field label="Categoria atual"><select value={profile.category} onChange={event=>update("category",event.target.value)}><option>Absoluto</option><option>Júnior</option><option>Juvenil</option></select></Field></div>}
     {step===2&&<div className="athlete-form compact-form"><Field label="Provas principais"><div className="event-pills">{["50L","100L","200L","400L"].map(item=><button type="button" key={item} className={profile.events.includes(item)?"active":""} onClick={()=>update("events",profile.events.includes(item)?profile.events.filter(event=>event!==item):[...profile.events,item])}>{item}</button>)}</div></Field><Field label="Outras provas"><select value={profile.otherEvent} onChange={event=>update("otherEvent",event.target.value)}><option value="">Selecione (opcional)</option><option>800 Livre</option></select></Field><Field label="Nível atual"><select value={profile.level} onChange={event=>update("level",event.target.value)}><option>Seleção nacional</option><option>Nacional</option><option>Estadual</option></select></Field><Field label="Clube atual"><input value={profile.club} onChange={event=>update("club",event.target.value)} placeholder="Digite seu clube" /></Field></div>}
     {step===3&&<div className="athlete-form compact-form"><Field label="Competição-alvo"><select value={profile.targetMeet} onChange={event=>update("targetMeet",event.target.value)}><option>Campeonato Brasileiro</option><option>Troféu Brasil</option></select></Field><Field label="Data da competição"><input type="date" value={profile.meetDate} onChange={event=>update("meetDate",event.target.value)} /></Field><Field label="Prova principal"><select value={profile.primaryEvent} onChange={event=>update("primaryEvent",event.target.value)}><option>400 Livre</option><option>200 Livre</option></select></Field><Field label="Provas secundárias"><select value={profile.secondaryEvent} onChange={event=>update("secondaryEvent",event.target.value)}><option>200 Livre</option><option>800 Livre</option></select></Field><Field label="Objetivo"><select value={profile.objective} onChange={event=>update("objective",event.target.value)}><option>Índice internacional</option><option>Recorde pessoal</option></select></Field></div>}
     {step===4&&<div className="availability"><div className="session-stepper"><button type="button" onClick={()=>setSessions(Math.max(3,sessions-1))}><Minus size={17}/></button><strong>{sessions}</strong><button type="button" onClick={()=>setSessions(Math.min(10,sessions+1))}><Plus size={17}/></button></div><small>Mínimo 3 · Máximo 10</small><b>Dias disponíveis</b><div className="day-pills">{["SEG","TER","QUA","QUI","SEX","SÁB","DOM"].map(day=><button type="button" className={days.includes(day)?"active":""} key={day} onClick={()=>setDays(days.includes(day)?days.filter(item=>item!==day):[...days,day])}>{day}</button>)}</div><b>Períodos disponíveis</b><div className="check-row">{["Manhã","Tarde","Noite"].map(period=><label key={period}><input type="checkbox" checked={periods.includes(period)} onChange={()=>setPeriods(periods.includes(period)?periods.filter(item=>item!==period):[...periods,period])}/>{period}</label>)}</div></div>}
@@ -242,6 +293,6 @@ function Competitions({ go }: { go:(screen:AthleteScreen)=>void }) { return <><s
 
 function CompetitionResult({ saving,onSave }: { saving:boolean;onSave:(payload:Record<string,unknown>)=>void }) { const [event,setEvent]=useState("400 Livre"); const [time,setTime]=useState("3:51.20"); const [place,setPlace]=useState("2º"); const [kind,setKind]=useState("PB"); const [notes,setNotes]=useState(""); return <form className="athlete-form competition-form" onSubmit={e=>{e.preventDefault();onSave({event,time,place,kind,notes,meet:"Campeonato Brasileiro",status:"official"});}}><h1>Resultado da competição</h1><h2>Campeonato Brasileiro</h2><p>20 a 24/09 · Semana 16</p><Field label="Prova"><select value={event} onChange={e=>setEvent(e.target.value)}><option>400 Livre</option><option>200 Livre</option></select></Field><Field label="Tempo"><input value={time} onChange={e=>setTime(e.target.value)}/></Field><Field label="Colocação"><select value={place} onChange={e=>setPlace(e.target.value)}><option>1º</option><option>2º</option><option>3º</option></select></Field><Field label="Tipo de marca"><select value={kind} onChange={e=>setKind(e.target.value)}><option>PB</option><option>SB</option><option>Oficial</option></select></Field><Field label="Parciais / Observações"><textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="100 56.8 / 200 1:55.2 / 300 2:54.9..."/></Field><AthleteButton type="submit" disabled={saving}>{saving?"Salvando...":"Salvar resultado"}</AthleteButton></form> }
 
-function MoreView({ go }: { go:(screen:AthleteScreen)=>void }) { const [selected,setSelected]=useState(""); const open=(label:string)=>{if(label.includes("Competições"))go("competitions");else if(label.includes("Histórico"))go("week");else setSelected(label);}; return <><section className="athlete-home-title"><div><h1>Mais</h1><p>Configurações e dados</p></div></section><div className="athlete-more-list">{menuItems.map(([Icon,label])=><button key={label} onClick={()=>open(label)}><Icon size={19}/><span>{label}</span><ChevronRight size={18}/></button>)}</div>{selected&&<section className="athlete-more-detail"><b>{selected}</b><p>Preferências e informações de {selected.toLowerCase()} disponíveis para consulta e atualização.</p><button onClick={()=>setSelected("")}>Concluir</button></section>}<button className="athlete-signout" onClick={()=>go("login")}><LockKeyhole size={17}/>Sair da conta</button><button className="coach-return" onClick={()=>window.location.assign("/pt/coach/today")}>Acessar área do treinador</button></> }
+function MoreView({ go, onSignOut }: { go:(screen:AthleteScreen)=>void; onSignOut: () => void }) { const [selected,setSelected]=useState(""); const open=(label:string)=>{if(label.includes("Competições"))go("competitions");else if(label.includes("Histórico"))go("week");else setSelected(label);}; return <><section className="athlete-home-title"><div><h1>Mais</h1><p>Configurações e dados</p></div></section><div className="athlete-more-list">{menuItems.map(([Icon,label])=><button key={label} onClick={()=>open(label)}><Icon size={19}/><span>{label}</span><ChevronRight size={18}/></button>)}</div>{selected&&<section className="athlete-more-detail"><b>{selected}</b><p>Preferências e informações de {selected.toLowerCase()} disponíveis para consulta e atualização.</p><button onClick={()=>setSelected("")}>Concluir</button></section>}<button className="athlete-signout" onClick={onSignOut}><LockKeyhole size={17}/>Sair da conta</button><button className="coach-return" onClick={()=>window.location.assign("/pt/coach/today")}>Acessar área do treinador</button></> }
 
 function screenTitle(screen: AthleteScreen) { const titles:Partial<Record<AthleteScreen,string>>={session:"Sessão de hoje",results:"Registrar resultados",checkout:"Fim do dia",week:"Semanal",competitions:"Competições",["competition-result"]:"Resultado",more:"Mais"}; return titles[screen]; }

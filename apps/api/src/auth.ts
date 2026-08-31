@@ -70,6 +70,17 @@ function createAccount(input: { id: string; organizationId: string; name: string
   return account;
 }
 
+/** Cria a conta de atleta associada a um convite já validado. */
+export function provisionInvitedAthlete(input: { athleteId: string; organizationId: string; name: string; email: string; password: string }) {
+  ensureSeedUsers();
+  const email = input.email.trim().toLowerCase();
+  if (input.password.length < 8) return { error: "password_too_short" as const };
+  if ([...accounts.values()].some((account) => account.email.toLowerCase() === email)) return { error: "email_in_use" as const };
+  const account = createAccount({ id: `user-${input.athleteId}`, organizationId: input.organizationId, name: input.name, email, athleteId: input.athleteId, role: "athlete", password: input.password });
+  const { passwordHash: _passwordHash, passwordSalt: _passwordSalt, cpf: _cpf, ...user } = account;
+  return { user };
+}
+
 /**
  * Seeding idempotente:
  * - dev/testes: contas demo fixas (compatibilidade com a suíte existente);

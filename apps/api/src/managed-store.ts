@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PostgresPersistence, type PersistenceHealth, type RkfSeedImport } from "./postgres-persistence.js";
@@ -10,9 +11,10 @@ export const resourceKinds = [
   "teams", "athleteProfiles", "athleteCalibrations", "trainingZones", "macrocycles", "mesocycles", "microcycles",
   "trainingSessions", "sessionBlocks", "sessionPrescriptions", "prescriptionBlocks", "sessionExecutions",
   "athleteResponses", "deviceSamples", "readinessScores", "syncJobs", "auditEvents", "sessionContextSnapshots",
+  "sessionResults", "setResults", "repetitionResults", "splitResults", "trainingIngestions",
   "performanceBenchmarks", "evolutionAssessments", "distanceFatigueRules", "trainingSourceAssets",
   "trainingExtractions", "trainingReviewItems", "importedTrainingSessions", "importedTrainingBlocks",
-  "athleteSessionAssignments", "loadCalculations",
+  "athleteSessionAssignments", "loadCalculations", "videoAnalysisJobs", "invitations",
 ] as const;
 export type ResourceKind = typeof resourceKinds[number];
 
@@ -28,7 +30,7 @@ export type ManagedRecord = {
 
 export type AuditRecord = {
   id: string;
-  action: "create" | "update" | "delete" | "import" | "upload" | "analyze";
+  action: "create" | "update" | "delete" | "import" | "upload" | "analyze" | "backup" | "restore";
   resource: ResourceKind;
   resourceId?: string;
   summary: string;
@@ -36,7 +38,25 @@ export type AuditRecord = {
   organizationId?: string;
 };
 
+export type StoreEvent = {
+  id: string;
+  action: AuditRecord["action"];
+  resource: ResourceKind;
+  resourceId?: string;
+  organizationId: string;
+  summary: string;
+  createdAt: string;
+  record?: ManagedRecord;
+};
+
 export type DatabaseShape = { resources: Record<ResourceKind, ManagedRecord[]>; audit: AuditRecord[] };
+
+type FileBackupEnvelope = {
+  id: string;
+  createdAt: string;
+  tables: Record<string, number>;
+  data: DatabaseShape;
+};
 
 const now = () => new Date().toISOString();
 const identifier = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -57,10 +77,10 @@ function seed(): DatabaseShape {
   return {
     resources: {
       athletes: records([
-        { id: "ana-souza", name: "Ana Souza", handle: "@anaswim", group: "Elite · Raia 4", stroke: "Livre", status: "active", email: "ana@aquaos.app" },
-        { id: "caio-martins", name: "Caio Martins", handle: "@caiobfly", group: "Elite · Raia 4", stroke: "Borboleta", status: "active", email: "caio@aquaos.app" },
-        { id: "luiza-costa", name: "Luiza Costa", handle: "@luizaback", group: "Desenvolvimento · Raia 3", stroke: "Costas", status: "active", email: "luiza@aquaos.app" },
-        { id: "pedro-lima", name: "Pedro Lima", handle: "@pedrobreast", group: "Desenvolvimento · Raia 3", stroke: "Peito", status: "active", email: "pedro@aquaos.app" },
+        { id: "ana-souza", name: "Ana Souza", handle: "@anaswim", group: "Elite · Raia 4", stroke: "Livre", status: "active", email: "ana@aquaos.app", readiness: 86, sleep: 8.1, recovery: 82, hrv: 72, restingHr: 48, weeklyDistance: 28600, previousDistance: 26400, attendance: 96, goalEvent: "200 m Livre", goalTime: "1:58.50", bestTime: "2:01.32", gap: "+2.82", wearable: "Garmin Fēnix 8", lastBodySync: "Hoje, 06:42" },
+        { id: "caio-martins", name: "Caio Martins", handle: "@caiobfly", group: "Elite · Raia 4", stroke: "Borboleta", status: "active", email: "caio@aquaos.app", readiness: 72, sleep: 6.8, recovery: 68, hrv: 59, restingHr: 52, weeklyDistance: 27100, previousDistance: 28200, attendance: 91, goalEvent: "100 m Borboleta", goalTime: "52.90", bestTime: "54.18", gap: "+1.28", wearable: "Polar Vantage V3", lastBodySync: "Hoje, 07:03" },
+        { id: "luiza-costa", name: "Luiza Costa", handle: "@luizaback", group: "Desenvolvimento · Raia 3", stroke: "Costas", status: "active", email: "luiza@aquaos.app", readiness: 58, sleep: 5.9, recovery: 54, hrv: 46, restingHr: 61, weeklyDistance: 21200, previousDistance: 24500, attendance: 87, goalEvent: "100 m Costas", goalTime: "1:01.20", bestTime: "1:03.86", gap: "+2.66", wearable: "WHOOP 5.0", lastBodySync: "Ontem, 22:48" },
+        { id: "pedro-lima", name: "Pedro Lima", handle: "@pedrobreast", group: "Desenvolvimento · Raia 3", stroke: "Peito", status: "active", email: "pedro@aquaos.app", readiness: 79, sleep: 7.6, recovery: 77, hrv: 64, restingHr: 51, weeklyDistance: 23400, previousDistance: 22600, attendance: 94, goalEvent: "200 m Peito", goalTime: "2:12.00", bestTime: "2:15.41", gap: "+3.41", wearable: "Garmin Forerunner 965", lastBodySync: "Hoje, 06:18" },
       ]),
       groups: records([{ id: "elite", name: "Elite · Raia 4", color: "#0c8f7c", members: 2, status: "active" }, { id: "desenvolvimento", name: "Desenvolvimento · Raia 3", color: "#7357ef", members: 2, status: "active" }]),
       workouts: records([{ id: "ritmo-200", title: "Ritmo de prova · 200 Livre", status: "published", date: "2026-08-28", distanceMeters: 5200, zone: "AN2" }, { id: "forca-maxima", title: "Força máxima · membros inferiores", status: "published", date: "2026-08-28", durationMinutes: 55 }]),
@@ -112,6 +132,11 @@ function seed(): DatabaseShape {
       syncJobs: records([]),
       auditEvents: records([]),
       sessionContextSnapshots: records([]),
+      sessionResults: records([]),
+      setResults: records([]),
+      repetitionResults: records([]),
+      splitResults: records([]),
+      trainingIngestions: records([]),
       performanceBenchmarks: records([]),
       evolutionAssessments: records([]),
       distanceFatigueRules: records([]),
@@ -122,6 +147,8 @@ function seed(): DatabaseShape {
       importedTrainingBlocks: records([]),
       athleteSessionAssignments: records([]),
       loadCalculations: records([]),
+      videoAnalysisJobs: records([]),
+      invitations: records([]),
     },
     audit: [],
   };
@@ -133,6 +160,7 @@ export class ManagedStore {
   private postgres?: PostgresPersistence;
   private writeQueue: Promise<void> = Promise.resolve();
   private persistenceError?: string;
+  private readonly subscribers = new Set<(event: StoreEvent) => void>();
 
   constructor(filePath = process.env.STORAGE_PATH
     ? resolve(process.env.STORAGE_PATH, "aquaos-data.json")
@@ -148,6 +176,11 @@ export class ManagedStore {
     if (!this.data.resources.settings.length) this.data.resources.settings = defaults.resources.settings;
     for (const zone of defaults.resources.zones) {
       if (!this.data.resources.zones.some((current) => current.code === zone.code)) this.data.resources.zones.push(zone);
+    }
+    for (const athlete of defaults.resources.athletes) {
+      const current = this.data.resources.athletes.find((record) => record.id === athlete.id);
+      if (!current) continue;
+      for (const [key, value] of Object.entries(athlete)) if (current[key] === undefined) current[key] = value;
     }
     for (const zone of this.data.resources.zones) {
       if (zone.code === "AN" || zone.code === "RP") Object.assign(zone, { status: "retired", retiredAt: zone.retiredAt ?? now(), migrationNote: "Vocabulário anterior preservado apenas para histórico RKF V5.1." });
@@ -179,6 +212,9 @@ export class ManagedStore {
         this.data = persisted;
         for (const kind of resourceKinds) this.data.resources[kind] ??= defaults.resources[kind];
         this.data.audit ??= [];
+        // Reprojeta dados existentes para as tabelas relacionais após novas
+        // migrations, sem alterar o payload canônico nem os IDs.
+        await this.postgres.save(structuredClone(this.data));
       } else {
         await this.postgres.save(structuredClone(this.data));
       }
@@ -242,18 +278,158 @@ export class ManagedStore {
   }
 
   async createBackup() {
-    if (this.postgres) return this.postgres.createBackup();
-    throw new Error("Backup requer o driver PostgreSQL");
+    if (this.postgres) {
+      const result = await this.postgres.createBackup();
+      // Mantém a evidência também no snapshot em memória; o próximo save()
+      // replica todo o estado e não pode apagar o registro criado diretamente
+      // pelo backup transacional.
+      this.data.audit.push({ id: result.id, action: "backup", resource: "governance", summary: `backup: ${result.id}`, createdAt: result.createdAt, organizationId: "system" });
+      this.persist();
+      return result;
+    }
+    const id = `backup-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    const createdAt = new Date().toISOString();
+    const data = structuredClone(this.data);
+    const tables = Object.fromEntries(resourceKinds.map((kind) => [kind, data.resources[kind]?.length ?? 0]));
+    const serialized = JSON.stringify({ id, createdAt, tables, data } satisfies FileBackupEnvelope);
+    const checksum = createHash("sha256").update(serialized).digest("hex");
+    const backupRoot = resolve(dirname(this.filePath), "backups");
+    mkdirSync(backupRoot, { recursive: true });
+    const temporary = resolve(backupRoot, `${id}.json.tmp`);
+    writeFileSync(temporary, serialized, "utf8");
+    renameSync(temporary, resolve(backupRoot, `${id}.json`));
+    writeFileSync(resolve(backupRoot, `${id}.sha256`), checksum, "utf8");
+    this.data.audit.push({ id, action: "backup", resource: "governance", summary: `backup: ${id}`, createdAt, organizationId: "system" });
+    this.persist();
+    return { id, checksum, tables, createdAt };
   }
 
   async verifyBackup(backupId: string) {
     if (this.postgres) return this.postgres.verifyBackup(backupId);
-    throw new Error("Backup requer o driver PostgreSQL");
+    const artifact = resolve(dirname(this.filePath), "backups", `${backupId}.json`);
+    if (!existsSync(artifact)) return { valid: false, checksum: null };
+    try {
+      const checksum = createHash("sha256").update(readFileSync(artifact)).digest("hex");
+      const expected = readFileSync(resolve(dirname(this.filePath), "backups", `${backupId}.sha256`), "utf8").trim();
+      return { valid: checksum === expected, checksum };
+    } catch {
+      return { valid: false, checksum: null };
+    }
+  }
+
+  async listBackups() {
+    if (this.postgres) return this.postgres.listBackups();
+    const backupRoot = resolve(dirname(this.filePath), "backups");
+    if (!existsSync(backupRoot)) return [];
+    return readdirSync(backupRoot).filter((name) => name.startsWith("backup-") && name.endsWith(".json")).sort().reverse().map((name) => {
+      const file = JSON.parse(readFileSync(resolve(backupRoot, name), "utf8")) as FileBackupEnvelope;
+      const checksum = createHash("sha256").update(readFileSync(resolve(backupRoot, name))).digest("hex");
+      const expected = existsSync(resolve(backupRoot, `${file.id}.sha256`)) ? readFileSync(resolve(backupRoot, `${file.id}.sha256`), "utf8").trim() : "";
+      return { id: file.id, checksum, createdAt: file.createdAt, tables: file.tables, valid: checksum === expected };
+    });
+  }
+
+  async restoreBackup(backupId: string, apply = false) {
+    if (this.postgres) {
+      const result = await this.postgres.restoreBackup(backupId, apply);
+      if (result.applied) {
+        const restored = await this.postgres.load();
+        if (restored) this.data = restored;
+      }
+      return result;
+    }
+    const artifact = resolve(dirname(this.filePath), "backups", `${backupId}.json`);
+    const verification = await this.verifyBackup(backupId);
+    if (!verification.valid || !existsSync(artifact)) return { valid: false, applied: false, tables: {}, checksum: verification.checksum };
+    const file = JSON.parse(readFileSync(artifact, "utf8")) as FileBackupEnvelope;
+    if (!apply) return { valid: true, applied: false, tables: file.tables, checksum: verification.checksum };
+    this.data = structuredClone(file.data);
+    this.persist();
+    return { valid: true, applied: true, tables: file.tables, checksum: verification.checksum };
   }
 
   list(kind: ResourceKind) { return this.data.resources[kind].slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); }
   get(kind: ResourceKind, id: string) { return this.data.resources[kind].find((item) => item.id === id); }
   audit(limit = 100) { return this.data.audit.slice(-limit).reverse(); }
+
+  analytics(weeks = 8, organizationId?: string) {
+    const size = Math.max(1, Math.min(52, Math.floor(weeks)));
+    const today = new Date();
+    const day = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const first = new Date(day);
+    first.setUTCDate(first.getUTCDate() - ((size - 1) * 7 + 6));
+    const dateOf = (record: ManagedRecord) => String(record.date ?? record.scheduledDate ?? record.startedAt ?? record.createdAt ?? "").slice(0, 10);
+    const inOrganization = (record: ManagedRecord) => !organizationId || String(record.organizationId ?? "org-demo") === organizationId;
+    const inRange = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && value >= first.toISOString().slice(0, 10) && value <= day.toISOString().slice(0, 10);
+    const weekIndex = (value: string) => {
+      const parsed = new Date(`${value}T12:00:00Z`);
+      return Math.max(0, Math.min(size - 1, Math.floor((parsed.getTime() - first.getTime()) / 604_800_000)));
+    };
+    const weeksData = Array.from({ length: size }, (_, index) => ({
+      index,
+      label: `S${index + 1}`,
+      start: new Date(first.getTime() + index * 604_800_000).toISOString().slice(0, 10),
+      plannedMeters: 0,
+      completedMeters: 0,
+      load: 0,
+      zones: {} as Record<string, number>,
+    }));
+    for (const workout of this.list("workouts").filter(inOrganization)) {
+      const date = dateOf(workout);
+      if (!inRange(date)) continue;
+      const bucket = weeksData[weekIndex(date)];
+      const distance = Number(workout.distanceMeters ?? 0);
+      bucket.plannedMeters += Number.isFinite(distance) ? distance : 0;
+      const zone = String(workout.zone ?? "A2");
+      bucket.zones[zone] = (bucket.zones[zone] ?? 0) + distance;
+    }
+    for (const activity of this.list("activities").filter(inOrganization)) {
+      const date = dateOf(activity);
+      if (!inRange(date)) continue;
+      const bucket = weeksData[weekIndex(date)];
+      const distance = Number(activity.distanceMeters ?? activity.executedVolumeM ?? activity.completedDistanceMeters ?? 0);
+      bucket.completedMeters += Number.isFinite(distance) ? distance : 0;
+      bucket.load += Number(activity.load ?? activity.value ?? activity.rpe ?? 0);
+    }
+    for (const snapshot of this.list("loadSnapshots").filter(inOrganization)) {
+      const date = dateOf(snapshot);
+      if (inRange(date)) weeksData[weekIndex(date)].load += Number(snapshot.value ?? 0);
+    }
+    const athletes = this.list("athletes").filter((record) => inOrganization(record) && String(record.status ?? "active") === "active");
+    const numericAverage = (key: string) => {
+      const values = athletes.map((record) => Number(record[key])).filter((value) => Number.isFinite(value));
+      return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length * 10) / 10 : null;
+    };
+    const videos = this.list("videos").filter(inOrganization);
+    const activeVideos = videos.filter((record) => String(record.status ?? "") !== "archived");
+    const recentDistance = athletes.reduce((sum, record) => sum + Number(record.weeklyDistance ?? 0), 0);
+    const previousDistance = athletes.reduce((sum, record) => sum + Number(record.previousDistance ?? 0), 0);
+    return {
+      generatedAt: now(),
+      windowWeeks: size,
+      metrics: {
+        activeAthletes: athletes.length,
+        readinessAverage: numericAverage("readiness"),
+        sleepAverage: numericAverage("sleep"),
+        attendanceAverage: numericAverage("attendance"),
+        healthCoverage: athletes.length ? Math.round(athletes.filter((record) => typeof record.readiness === "number").length / athletes.length * 100) : 0,
+        videoCoverage: athletes.length ? Math.round(new Set(activeVideos.map((record) => record.athleteId).filter(Boolean)).size / athletes.length * 100) : 0,
+        videosTotal: activeVideos.length,
+        videosPending: activeVideos.filter((record) => String(record.status ?? "") !== "reviewed").length,
+        resultsCount: this.list("results").filter(inOrganization).length,
+        plannedMeters: weeksData.reduce((sum, item) => sum + item.plannedMeters, 0),
+        completedMeters: weeksData.reduce((sum, item) => sum + item.completedMeters, 0),
+        adherence: recentDistance > 0 && previousDistance > 0 ? Math.round(Math.min(1.2, recentDistance / previousDistance) * 1000) / 10 : null,
+      },
+      weekly: weeksData,
+      athletes: athletes.map((record) => ({ id: record.id, name: record.name, readiness: record.readiness, attendance: record.attendance, weeklyDistance: record.weeklyDistance, previousDistance: record.previousDistance, goalEvent: record.goalEvent, gap: record.gap })),
+    };
+  }
+
+  subscribe(listener: (event: StoreEvent) => void) {
+    this.subscribers.add(listener);
+    return () => this.subscribers.delete(listener);
+  }
 
   create(kind: ResourceKind, input: Record<string, unknown>, action: AuditRecord["action"] = "create") {
     const timestamp = now();
@@ -261,6 +437,7 @@ export class ManagedStore {
     this.data.resources[kind].push(record);
     this.log(action, kind, record.id, String(record.name ?? record.title ?? record.id), String(record.organizationId ?? "org-demo"));
     this.persist();
+    this.emit({ action, resource: kind, resourceId: record.id, organizationId: String(record.organizationId ?? "org-demo"), summary: String(record.name ?? record.title ?? record.id), createdAt: timestamp, record });
     return record;
   }
 
@@ -270,6 +447,7 @@ export class ManagedStore {
     Object.assign(record, patch, { id, createdAt: record.createdAt, updatedAt: now() });
     this.log(action, kind, id, String(record.name ?? record.title ?? id), String(record.organizationId ?? "org-demo"));
     this.persist();
+    this.emit({ action, resource: kind, resourceId: id, organizationId: String(record.organizationId ?? "org-demo"), summary: String(record.name ?? record.title ?? id), createdAt: record.updatedAt, record });
     return record;
   }
 
@@ -279,6 +457,7 @@ export class ManagedStore {
     const [removed] = this.data.resources[kind].splice(index, 1);
     this.log("delete", kind, id, String(removed.name ?? removed.title ?? id), String(removed.organizationId ?? "org-demo"));
     this.persist();
+    this.emit({ action: "delete", resource: kind, resourceId: id, organizationId: String(removed.organizationId ?? "org-demo"), summary: String(removed.name ?? removed.title ?? id), createdAt: now() });
     return removed;
   }
 
@@ -288,7 +467,15 @@ export class ManagedStore {
     this.data.resources[kind].push(...created);
     for (const record of created) this.log("import", kind, record.id, String(record.name ?? record.title ?? record.id), String(record.organizationId ?? "org-demo"));
     this.persist();
+    for (const record of created) this.emit({ action: "import", resource: kind, resourceId: record.id, organizationId: String(record.organizationId ?? "org-demo"), summary: String(record.name ?? record.title ?? record.id), createdAt: timestamp, record });
     return { imported: created.length, records: created };
+  }
+
+  private emit(event: Omit<StoreEvent, "id">) {
+    const payload = { ...event, id: identifier("event") };
+    for (const subscriber of this.subscribers) {
+      try { subscriber(payload); } catch { /* um consumidor não pode interromper as mutações */ }
+    }
   }
 
   private log(action: AuditRecord["action"], resource: ResourceKind, resourceId: string | undefined, label: string, organizationId = "org-demo") {

@@ -24,3 +24,6 @@ Thumbs.db
 
 apps/web/test-results/
 apps/web/playwright-report/
+apps/api/storage/backups/
+apps/api/storage/uploads/*-ditado.wav
+apps/api/storage/uploads/*-voice-*

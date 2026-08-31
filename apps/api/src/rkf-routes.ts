@@ -16,6 +16,7 @@ import { DOMAIN_EVENT_CONTRACTS, DOMAIN_EVENT_CATALOG_VERSION } from "./domain-e
 import { applyIngestionSeeds, INGESTION_CONTRACTS, INGESTION_SEEDS, INGESTION_SEED_VERSION, PRODUCT_PLANS, plansForRole, type IngestionSeedExecution } from "./rkf-ingestion-seeds.js";
 import { UI_CONTRACTS, UI_SEEDS, UI_CONTRACT_VERSION, uiSeedStateCoverage } from "./rkf-ui-contracts.js";
 import { createVoiceIngestion, attachTranscript, correctExtraction, confirmVoiceIngestion, commitVoiceIngestion, VOICE_PIPELINE_VERSION, type VoiceExtraction } from "./rkf-voice.js";
+import { uploadRoot } from "./operational-routes.js";
 import {
   AGE_BANDS, buildLoadAlerts, classifyEvolution, coldStartFor, computeChronicSeries,
   computeLoadLayers, computeMonotony, computeResponseIndex, decideAdaptation, DISTRIBUTION_MATRICES,
@@ -234,9 +235,20 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
     try {
       const backup = await store?.createBackup();
       if (!backup) return reply.code(503).send({ error: "Backup requer o driver PostgreSQL" });
-      return backup;
+      return reply.code(201).send(backup);
     } catch (error) {
       return reply.code(500).send({ error: "Falha ao criar backup", detail: error instanceof Error ? error.message : undefined });
+    }
+  });
+
+  app.get("/api/v1/backup", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    if (!roleAllows(user, ["coach", "admin"])) return reply.code(403).send({ error: "Listagem é exclusiva da comissão técnica" });
+    try {
+      return { backups: await store?.listBackups() ?? [] };
+    } catch (error) {
+      return reply.code(503).send({ error: error instanceof Error ? error.message : "Backup requer o driver PostgreSQL" });
     }
   });
 
@@ -251,6 +263,23 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       return verification;
     } catch (error) {
       return reply.code(500).send({ error: "Falha ao verificar backup", detail: error instanceof Error ? error.message : undefined });
+    }
+  });
+
+  app.post("/api/v1/backup/:id/restore", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    if (user.role !== "admin") return reply.code(403).send({ error: "Restauração exige o papel admin" });
+    const { id } = z.object({ id: z.string().regex(/^backup-/) }).parse(request.params);
+    const body = z.object({ apply: z.boolean().default(false), confirmation: z.string().optional() }).safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: "Opções de restauração inválidas", details: body.error.flatten() });
+    if (body.data.apply && body.data.confirmation !== `RESTORE ${id}`) return reply.code(409).send({ error: `Confirmação obrigatória: RESTORE ${id}` });
+    try {
+      const result = await store?.restoreBackup(id, body.data.apply);
+      if (!result) return reply.code(503).send({ error: "Backup requer o driver PostgreSQL" });
+      return result;
+    } catch (error) {
+      return reply.code(500).send({ error: "Falha ao restaurar backup", detail: error instanceof Error ? error.message : undefined });
     }
   });
 
@@ -277,7 +306,16 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       results: relates(store?.list("results")),
       loadSnapshots: relates(store?.list("loadSnapshots")),
       adaptationDecisions: relates(store?.list("adaptationDecisions")),
-      audit: scoped(store?.list("governance")),
+      sessionExecutions: relates(store?.list("sessionExecutions")),
+      athleteResponses: relates(store?.list("athleteResponses")),
+      readinessScores: relates(store?.list("readinessScores")),
+      sessionContextSnapshots: relates(store?.list("sessionContextSnapshots")),
+      performanceBenchmarks: relates(store?.list("performanceBenchmarks")),
+      evolutionAssessments: relates(store?.list("evolutionAssessments")),
+      importedTrainingSessions: relates(store?.list("importedTrainingSessions")),
+      importedTrainingBlocks: scoped(store?.list("importedTrainingBlocks")).filter((item) => item.importedSessionId && relates(store?.list("importedTrainingSessions")).some((session) => session.id === item.importedSessionId)),
+      documents: scoped(store?.list("documents")).filter((item) => item.athleteId === athleteId || item.referenceId === athleteId),
+      audit: scoped(store?.list("governance")).filter((item) => item.athleteId === athleteId || String(item.summary ?? "").includes(athleteId)),
     };
     return payload;
   });
@@ -301,6 +339,18 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       lgpdBasis: body.data.lgpdBasis,
       lgpdRequestedBy: body.data.requestedBy,
     }, "update");
+    for (const record of store?.list("users").filter((item) => item.athleteId === athleteId) ?? []) {
+      store?.update("users", record.id, { name: `Usuário anonimizado ${athleteId}`, email: undefined, cpf: undefined, status: "anonymized", anonymizedAt: new Date().toISOString() }, "update");
+    }
+    for (const record of store?.list("videos").filter((item) => item.athleteId === athleteId) ?? []) {
+      store?.update("videos", record.id, { athlete: `Atleta anonimizado ${athleteId}`, title: `Vídeo anonimizado ${record.id}`, originalName: undefined }, "update");
+    }
+    for (const record of store?.list("documents").filter((item) => item.athleteId === athleteId || item.referenceId === athleteId) ?? []) {
+      store?.update("documents", record.id, { title: `Documento anonimizado ${record.id}`, originalName: undefined }, "update");
+    }
+    for (const record of store?.list("activities").filter((item) => item.athleteId === athleteId) ?? []) {
+      store?.update("activities", record.id, { athlete: `Atleta anonimizado ${athleteId}`, notes: undefined }, "update");
+    }
     return { ok: true, athlete: anonymized, note: "Carga, resultados e snapshots preservados sem PII; métricas permanecem auditáveis." };
   });
 
@@ -368,14 +418,16 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
     const splitSchema = z.object({ distanceM: z.number().positive(), timeSeconds: z.number().positive() });
     const repetitionSchema = z.object({ repetition: z.number().int().positive(), distanceM: z.number().positive(), timeSeconds: z.number().positive(), stroke: z.string().optional(), note: z.string().optional(), splits: z.array(splitSchema).default([]) });
     const setSchema = z.object({ set: z.number().int().positive(), label: z.string().min(1), zone: zoneEnum.optional(), repetitions: z.array(repetitionSchema).min(1) });
-    const parsed = z.object({ athleteId: z.string().min(1), prescriptionId: z.string().optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), event: z.string().min(1), poolLengthM: z.union([z.literal(25), z.literal(50)]), sessionDistanceM: z.number().positive(), capturedDistanceM: z.number().positive(), durationMinutes: z.number().positive(), pse: z.number().min(1).max(10), expectedPse: z.number().min(1).max(10).optional(), prescribedVolumeM: z.number().positive().optional(), sets: z.array(setSchema).min(1), notes: z.string().max(2000).optional() }).safeParse(request.body);
+    const parsed = z.object({ athleteId: z.string().min(1), prescriptionId: z.string().optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), event: z.string().min(1), poolLengthM: z.union([z.literal(25), z.literal(50)]), sessionDistanceM: z.number().positive(), capturedDistanceM: z.number().positive(), durationMinutes: z.number().positive(), pse: z.number().min(1).max(10), expectedPse: z.number().min(1).max(10).optional(), prescribedVolumeM: z.number().positive().optional(), stroke: z.string().trim().min(1).optional(), mode: z.string().trim().min(1).optional(), material: z.string().trim().min(1).optional(), protocol: z.string().trim().min(1).optional(), sets: z.array(setSchema).min(1), notes: z.string().max(2000).optional() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "Resultado pós-treino inválido", details: parsed.error.flatten() });
     const isOwn = athleteMayAccess(user, parsed.data.athleteId);
     if (!roleAllows(user, ["coach", "admin"]) && !isOwn) return reply.code(403).send({ error: "Atleta só pode registrar o próprio resultado" });
     const repetitions = parsed.data.sets.flatMap((set) => set.repetitions);
     const bestTimeSeconds = Math.min(...repetitions.map((repetition) => repetition.timeSeconds));
     const averageTimeSeconds = Math.round((repetitions.reduce((sum, repetition) => sum + repetition.timeSeconds, 0) / repetitions.length) * 100) / 100;
-    const normalized = { ...parsed.data, bestTimeSeconds, averageTimeSeconds, comparableKey: `${parsed.data.event}|${parsed.data.poolLengthM}|${repetitions[0].distanceM}|${parsed.data.sets[0].zone ?? "UNSPECIFIED"}` };
+    const comparableDimensions = [parsed.data.athleteId, parsed.data.stroke, repetitions[0].distanceM, parsed.data.sets[0].zone, parsed.data.mode, parsed.data.material, `${parsed.data.poolLengthM}m`, parsed.data.protocol];
+    const comparableKeyComplete = comparableDimensions.every((value) => value !== undefined && value !== null && value !== "");
+    const normalized = { ...parsed.data, bestTimeSeconds, averageTimeSeconds, comparableKey: comparableKeyComplete ? comparableDimensions.join("|") : null, comparableKeyComplete };
     const snapshotHash = createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
     const result = store.create("results", { title: `${parsed.data.event} · ${parsed.data.date}`, ...normalized, status: "CONFIRMED", immutable: true, snapshotHash, source: user.role === "athlete" ? "ATHLETE_CONFIRMED" : "COACH_CONFIRMED", actorId: user.id, organizationId: user.organizationId });
     const load = computeLoadLayers([{ athleteId: parsed.data.athleteId, date: parsed.data.date, pse: parsed.data.pse, durationMinutes: parsed.data.durationMinutes, prescribedVolumeM: parsed.data.prescribedVolumeM, executedVolumeM: parsed.data.sessionDistanceM, expectedPse: parsed.data.expectedPse }]);
@@ -590,6 +642,8 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   }));
 
   app.post("/api/v1/rkf/cycles/generate", async (request, reply) => {
+    const actor = await getSession(sessionToken(request));
+    if (actor && !roleAllows(actor, ["coach", "admin"])) return reply.code(403).send({ error: "Geração de ciclo é exclusiva da comissão técnica" });
     const schema = z.object({
       age: z.number().int().min(8).max(120),
       totalWeeks: z.number().int().min(4).max(52),
@@ -609,6 +663,8 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   });
 
   app.post("/api/v1/rkf/sessions/compose", async (request, reply) => {
+    const actor = await getSession(sessionToken(request));
+    if (actor && !roleAllows(actor, ["coach", "admin"])) return reply.code(403).send({ error: "Composição de prescrição é exclusiva da comissão técnica" });
     const schema = z.object({
       athlete: z.object({
         athleteId: z.string().min(1),
@@ -634,6 +690,10 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
     const parsed = schema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "Requisição de prescrição inválida", details: parsed.error.flatten() });
     const { athlete, request: planning } = parsed.data;
+    if (actor?.role === "coach" && store) {
+      const target = store.get("athletes", athlete.athleteId);
+      if (target && target.organizationId !== actor.organizationId) return reply.code(403).send({ error: "Atleta pertence a outra organização" });
+    }
     const library = loadRkfLibrary();
     const result = generatePrescription(athlete, { ...planning, skillEmphasis: planning.skillEmphasis as SkillCode[] | undefined }, library?.sessions ?? []);
     return reply.code(result.status === "PRONTO" ? 201 : 422).send({
@@ -698,6 +758,8 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
     });
     const parsed = z.object({ sessions: z.array(sessionSchema).min(1) }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "Sessões de carga inválidas", details: parsed.error.flatten() });
+    const actor = await getSession(sessionToken(request));
+    if (actor?.role === "athlete" && parsed.data.sessions.some((session) => !athleteMayAccess(actor, session.athleteId))) return reply.code(403).send({ error: "Atleta só pode calcular a própria carga" });
     const layers = computeLoadLayers(parsed.data.sessions);
     const daily = new Map<string, number>();
     for (const session of parsed.data.sessions) {
@@ -736,6 +798,11 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
     if (!parsed.success) return reply.code(400).send({ error: "Requisição de adaptação inválida", details: parsed.error.flatten() });
     const user = await requireAuthenticated(request, reply);
     if (!user) return;
+    if (user.role === "athlete" && parsed.data.athleteId && !athleteMayAccess(user, parsed.data.athleteId)) return reply.code(403).send({ error: "Atleta só pode adaptar a própria sessão" });
+    if (user.role !== "athlete" && store && parsed.data.athleteId) {
+      const target = store.get("athletes", parsed.data.athleteId);
+      if (target && target.organizationId !== user.organizationId) return reply.code(403).send({ error: "Atleta pertence a outra organização" });
+    }
     const { readiness, prescribedVolumeM, primaryZone, coachApproved, zoneMapping, persist, ...rest } = parsed.data;
     const decision = decideAdaptation({ readiness, prescribedVolumeM, primaryZone, guardrails: { readiness, ...rest }, coachApproved, zoneMapping });
     if (persist && store) {
@@ -971,6 +1038,28 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       featureFlags: { voiceIngestion: true, deviceCommands: false, wearableRead: true },
       role: user.role,
     };
+  });
+
+  // Aliases canônicos do contrato do manual §20, mantendo /rkf/* para a UI
+  // legada sem duplicar regras de autorização.
+  app.get("/api/v1/entitlements", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    const coach = roleAllows(user, ["coach", "admin"]);
+    return { entitlements: coach ? ["LOAD_ATHLETE", "LOAD_TEAM", "FULL_ATHLETE", "FULL_TEAM"] : ["LOAD_ATHLETE"], featureFlags: { voiceIngestion: true, deviceCommands: false, wearableRead: true }, role: user.role };
+  });
+
+  app.get("/api/v1/ui/bootstrap", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    return { version: "rkf-ui-contracts-1.0.0", role: user.role, navigation: user.role === "athlete" ? ["home", "week", "session", "competitions", "more"] : ["today", "athletes", "practices", "seasons", "videos", "analytics", "rkf", "inbox", "integrations", "settings"], featureFlags: { voiceIngestion: true, deviceCommands: false, wearableRead: true } };
+  });
+
+  app.get("/api/v1/audit/events", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user || !roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação não autorizada" : "Autenticação necessária" });
+    const query = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) }).parse(request.query);
+    return { data: (store?.audit(query.limit) ?? []).filter((event) => event.organizationId === user.organizationId).slice(0, query.limit) };
   });
 
   /** G25: contrato formal dos quatro planos do produto (manual §22). */
@@ -1237,7 +1326,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
     if (![".mp3", ".m4a", ".wav", ".ogg", ".webm"].includes(extension)) return reply.code(415).send({ error: `Formato de áudio ${extension || "desconhecido"} não suportado` });
     const titleField = Array.isArray(file.fields.title) ? file.fields.title[0] : file.fields.title;
     const title = typeof titleField === "string" ? titleField : String((titleField as { value?: string } | undefined)?.value ?? `Ditado de voz · ${file.filename}`);
-    const record = createVoiceIngestion(store, { audio: buffer, filename: file.filename, mime: file.mimetype, organizationId: coach.organizationId, actorId: coach.id, title });
+    const record = createVoiceIngestion(store, { audio: buffer, filename: file.filename, mime: file.mimetype, storageRoot: uploadRoot, organizationId: coach.organizationId, actorId: coach.id, title });
     // Sem STT configurado o registro permanece LOCAL/DRAFT com sttStatus PENDING (nunca inventa transcrição).
     return reply.code(201).send({ ...record, note: "Áudio armazenado com hash. Envie a transcrição em /voice/ingestions/:id/transcript; sem STT o registro permanece PENDING." });
   });

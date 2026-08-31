@@ -8,7 +8,7 @@ import {
   Menu, MoreHorizontal, Plus, Search, Settings, SlidersHorizontal, Sparkles, Trophy, Users, Waves,
   Wifi,
 } from "lucide-react";
-import { athletes, meets, videos } from "./demo-data";
+import { athletes, hydrateAthlete, meets, videos, type AthleteProfile } from "./demo-data";
 import { Avatar } from "./components";
 import { AthleteDetail, Practices, Team, Today, type AppView } from "./views-primary";
 import { Analytics, Integrations, News, ProgramSettings, Season, Videos } from "./views-secondary";
@@ -18,7 +18,7 @@ import type { WorkoutSeed } from "./workout-library-actions";
 import { AiAssistant } from "./ai-assistant";
 import { RkfOperations } from "./rkf-operations";
 import { AuthGate } from "./auth-gate";
-import { apiRequest } from "./api";
+import { apiRequest, subscribeToLiveEvents } from "./api";
 
 type Modal = "workout" | "invite" | "video" | "meet" | "command" | "manage" | "connection" | null;
 
@@ -49,7 +49,7 @@ function viewFromPath(pathname: string): AppView {
   return "today";
 }
 
-export default function Dashboard() {
+function CoachWorkspace() {
   const pathname = usePathname();
   const router = useRouter();
   const view = viewFromPath(pathname);
@@ -64,16 +64,19 @@ export default function Dashboard() {
   const [connectionProvider, setConnectionProvider] = useState<"garmin" | "polar" | "apple">("garmin");
   const [workoutSeed, setWorkoutSeed] = useState<WorkoutSeed | undefined>();
   const [workoutRefresh, setWorkoutRefresh] = useState(0);
+  const [liveVersion, setLiveVersion] = useState(0);
+  const [liveStatus, setLiveStatus] = useState<"connecting" | "open" | "error">("connecting");
+  const [managedAthletes, setManagedAthletes] = useState<AthleteProfile[]>(athletes);
   const searchInput = useRef<HTMLInputElement>(null);
   const athleteId = pathname.split("/athletes/")[1]?.split("/")[0];
-  const selectedAthlete = athletes.find((athlete) => athlete.id === athleteId);
+  const selectedAthlete = managedAthletes.find((athlete) => athlete.id === athleteId);
 
   const go = (next: AppView) => { router.push(routes[next]); setMobileOpen(false); };
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 3200); };
   const openManage = (kind: ManagementKind = "athletes", create = false) => { setManageKind(kind); setCreateManaged(create); setModal("manage"); };
   const openWorkout = (seed?: WorkoutSeed) => { setWorkoutSeed(seed); setModal("workout"); };
   const searchResults = search.trim() ? [
-    ...athletes.filter((athlete) => `${athlete.name} ${athlete.handle} ${athlete.group}`.toLowerCase().includes(search.toLowerCase())).slice(0, 4).map((athlete) => ({ id: athlete.id, label: athlete.name, detail: athlete.group, action: () => router.push(`${routes.athletes}/${athlete.id}`) })),
+    ...managedAthletes.filter((athlete) => `${athlete.name} ${athlete.handle} ${athlete.group}`.toLowerCase().includes(search.toLowerCase())).slice(0, 4).map((athlete) => ({ id: athlete.id, label: athlete.name, detail: athlete.group, action: () => router.push(`${routes.athletes}/${athlete.id}`) })),
     ...nav.filter((item) => item.label.toLowerCase().includes(search.toLowerCase())).slice(0, 3).map((item) => ({ id: item.id, label: item.label, detail: "Módulo", action: () => go(item.id) })),
   ] : [];
   const selectSearch = (action: () => void) => { action(); setSearch(""); };
@@ -85,8 +88,14 @@ export default function Dashboard() {
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
   }, []);
+  useEffect(() => subscribeToLiveEvents(() => setLiveVersion((value) => value + 1), setLiveStatus), []);
+  useEffect(() => {
+    void apiRequest<{ data: Array<Record<string, unknown>> }>("/api/v1/manage/athletes")
+      .then((response) => setManagedAthletes(response.data.map(hydrateAthlete)))
+      .catch(() => setManagedAthletes(athletes));
+  }, [liveVersion]);
 
-  return <AuthGate><div className="app-shell">
+  return <div className="app-shell">
     <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
       <button className="brand" onClick={() => go("today")}>
         <span className="brand-mark"><Waves size={21} /></span>
@@ -111,18 +120,18 @@ export default function Dashboard() {
       <header className="topbar">
         <button className="icon-button menu-button" onClick={() => setMobileOpen(true)} aria-label="Abrir menu"><Menu size={21} /></button>
         <div className="global-search"><Search size={17} /><input ref={searchInput} value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && searchResults[0]) selectSearch(searchResults[0].action); }} placeholder="Buscar atleta, treino, prova…" aria-label="Busca global" /><kbd>⌘ K</kbd>{search && <div className="global-search-results">{searchResults.length ? searchResults.map((result) => <button key={`${result.detail}-${result.id}`} onClick={() => selectSearch(result.action)}><span><b>{result.label}</b><small>{result.detail}</small></span><ArrowRight size={15} /></button>) : <p>Nenhum atleta ou módulo encontrado.</p>}</div>}</div>
-        <div className="top-actions"><div className="sync-state"><Wifi size={15} /><span>Sincronizado agora</span></div><button className="icon-button bell-button" onClick={() => go("inbox")} aria-label="Novidades"><Bell size={19} /><i /></button><button className="secondary-button compact manage-button" onClick={() => openManage()}><SlidersHorizontal size={16} />Gerenciar</button><button className="primary-button compact" onClick={() => setModal("command")}><Plus size={17} />Criar</button></div>
+        <div className="top-actions"><div className={`sync-state ${liveStatus === "error" ? "offline" : ""}`}><Wifi size={15} /><span>{liveStatus === "open" ? "Dados em tempo real" : liveStatus === "error" ? "Reconectando dados" : "Conectando dados"}</span></div><button className="icon-button bell-button" onClick={() => go("inbox")} aria-label="Novidades"><Bell size={19} /><i /></button><button className="secondary-button compact manage-button" onClick={() => openManage()}><SlidersHorizontal size={16} />Gerenciar</button><button className="primary-button compact" onClick={() => setModal("command")}><Plus size={17} />Criar</button></div>
       </header>
       <main className="content">
-        {view === "today" && <Today onCreate={() => openWorkout()} onNavigate={go} onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} />}
-        {view === "athletes" && (selectedAthlete ? <AthleteDetail athlete={selectedAthlete} onBack={() => router.push(routes.athletes)} onCreate={() => openWorkout()} onNavigate={go} onNotify={notify} /> : <Team onInvite={() => setModal("invite")} onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} />)}
-        {view === "practices" && <Practices onCreate={openWorkout} onNotify={notify} refreshToken={workoutRefresh} />}
-        {view === "seasons" && <Season onMeet={(id) => { setMeetId(id); setModal("meet"); }} onSettings={() => go("settings")} onCreateMeet={() => openManage("meets", true)} onNotify={notify} />}
-        {view === "videos" && <Videos onVideo={(id) => { setVideoId(id); setModal("video"); }} onNotify={notify} />}
-        {view === "analytics" && <Analytics onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} />}
+        {view === "today" && <Today onCreate={() => openWorkout()} onNavigate={go} onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} liveVersion={liveVersion} />}
+        {view === "athletes" && (selectedAthlete ? <AthleteDetail athlete={selectedAthlete} onBack={() => router.push(routes.athletes)} onCreate={() => openWorkout()} onNavigate={go} onNotify={notify} /> : <Team onInvite={() => setModal("invite")} onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} liveVersion={liveVersion} />)}
+        {view === "practices" && <Practices onCreate={openWorkout} onNotify={notify} refreshToken={workoutRefresh + liveVersion} />}
+        {view === "seasons" && <Season onMeet={(id) => { setMeetId(id); setModal("meet"); }} onSettings={() => go("settings")} onCreateMeet={() => openManage("meets", true)} onNotify={notify} liveVersion={liveVersion} />}
+        {view === "videos" && <Videos onVideo={(id) => { setVideoId(id); setModal("video"); }} onNotify={notify} liveVersion={liveVersion} />}
+        {view === "analytics" && <Analytics onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} liveVersion={liveVersion} />}
         {view === "rkf" && <RkfOperations onNotify={notify} />}
         {view === "inbox" && <News onNavigate={go} onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} />}
-        {view === "integrations" && <Integrations onNotify={notify} onCreateConnection={(provider = "garmin") => { setConnectionProvider(provider); setModal("connection"); }} />}
+        {view === "integrations" && <Integrations onNotify={notify} onCreateConnection={(provider = "garmin") => { setConnectionProvider(provider); setModal("connection"); }} liveVersion={liveVersion} />}
         {view === "settings" && <ProgramSettings onNotify={notify} />}
       </main>
     </div>
@@ -139,5 +148,9 @@ export default function Dashboard() {
     {modal === "connection" && <ConnectionDialog initialProvider={connectionProvider} onClose={() => setModal(null)} onSave={notify} />}
     {toast && <div className="toast"><CircleCheck size={18} />{toast}</div>}
     <AiAssistant />
-  </div></AuthGate>;
+  </div>;
+}
+
+export default function Dashboard() {
+  return <AuthGate><CoachWorkspace /></AuthGate>;
 }
