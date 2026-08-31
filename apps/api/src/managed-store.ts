@@ -36,6 +36,9 @@ export type AuditRecord = {
   summary: string;
   createdAt: string;
   organizationId?: string;
+  checksum?: string;
+  tables?: Record<string, number>;
+  artifact?: string;
 };
 
 export type StoreEvent = {
@@ -283,7 +286,7 @@ export class ManagedStore {
       // Mantém a evidência também no snapshot em memória; o próximo save()
       // replica todo o estado e não pode apagar o registro criado diretamente
       // pelo backup transacional.
-      this.data.audit.push({ id: result.id, action: "backup", resource: "governance", summary: `backup: ${result.id}`, createdAt: result.createdAt, organizationId: "system" });
+      this.data.audit.push({ id: result.id, action: "backup", resource: "governance", summary: `backup: ${result.id}`, createdAt: result.createdAt, organizationId: "system", checksum: result.checksum, tables: result.tables, artifact: `${result.id}.json` });
       this.persist();
       return result;
     }
@@ -299,7 +302,7 @@ export class ManagedStore {
     writeFileSync(temporary, serialized, "utf8");
     renameSync(temporary, resolve(backupRoot, `${id}.json`));
     writeFileSync(resolve(backupRoot, `${id}.sha256`), checksum, "utf8");
-    this.data.audit.push({ id, action: "backup", resource: "governance", summary: `backup: ${id}`, createdAt, organizationId: "system" });
+    this.data.audit.push({ id, action: "backup", resource: "governance", summary: `backup: ${id}`, createdAt, organizationId: "system", checksum, tables, artifact: `${id}.json` });
     this.persist();
     return { id, checksum, tables, createdAt };
   }
