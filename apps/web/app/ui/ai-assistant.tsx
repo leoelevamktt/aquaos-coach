@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bot, Send, Sparkles, X, MessageCircle } from "lucide-react";
+import { Bot, Send, X, MessageCircle } from "lucide-react";
 import { API_URL, apiRequest } from "./api";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -135,7 +135,7 @@ export function AiAssistant() {
   if (!open) {
     return (
       <button className="ai-fab" onClick={() => setOpen(true)} aria-label="Abrir assistente de IA">
-        <Sparkles size={20} />
+        <MessageCircle size={21} />
       </button>
     );
   }
