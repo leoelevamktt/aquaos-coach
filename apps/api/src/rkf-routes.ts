@@ -15,6 +15,7 @@ import { evaluateRkfReleaseGates } from "./rkf-release-gates.js";
 import { DOMAIN_EVENT_CONTRACTS, DOMAIN_EVENT_CATALOG_VERSION } from "./domain-events.js";
 import { applyIngestionSeeds, INGESTION_CONTRACTS, INGESTION_SEEDS, INGESTION_SEED_VERSION, PRODUCT_PLANS, plansForRole, type IngestionSeedExecution } from "./rkf-ingestion-seeds.js";
 import { UI_CONTRACTS, UI_SEEDS, UI_CONTRACT_VERSION, uiSeedStateCoverage } from "./rkf-ui-contracts.js";
+import { createVoiceIngestion, attachTranscript, correctExtraction, confirmVoiceIngestion, commitVoiceIngestion, VOICE_PIPELINE_VERSION, type VoiceExtraction } from "./rkf-voice.js";
 import {
   AGE_BANDS, buildLoadAlerts, classifyEvolution, coldStartFor, computeChronicSeries,
   computeLoadLayers, computeMonotony, computeResponseIndex, decideAdaptation, DISTRIBUTION_MATRICES,
@@ -97,6 +98,16 @@ function latestE2eEvidence(store: ManagedStore | undefined, organizationId: stri
   return evidences[0];
 }
 
+function voiceEvidenceFor(store: ManagedStore | undefined, organizationId: string): { pipelineComplete: boolean; commitRequiresConfirmation: boolean; confirmedVoiceCount: number } {
+  const voiceIngestions = (store?.list("ingestions") ?? []).filter((item) => item.organizationId === organizationId && item.channel === "VOICE");
+  const committed = voiceIngestions.filter((item) => item.voiceState === "COMMITTED");
+  return {
+    pipelineComplete: committed.length > 0,
+    commitRequiresConfirmation: true,
+    confirmedVoiceCount: voiceIngestions.filter((item) => item.voiceState === "CONFIRMED" || item.voiceState === "COMMITTED").length,
+  };
+}
+
 export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   app.get("/api/v1/rkf/bootstrap", async (request) => {
     const viewer = await getSession(sessionToken(request));
@@ -139,6 +150,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       uiContractCount: UI_CONTRACTS.length,
       uiSeedCount: UI_SEEDS.length,
       e2eEvidence: latestE2eEvidence(store, organizationId),
+      voiceEvidence: voiceEvidenceFor(store, organizationId),
       confirmedIngestionCount: ingestions.filter((item) => item.state === "CONFIRMED").length,
       ingestionChannelsObserved: ingestions.map((item) => String(item.channel ?? "")),
       auditableOriginalFormatsObserved: [...new Set(ingestions.map((item) => extname(String(item.sourceName ?? "")).slice(1).toLowerCase()).filter(Boolean))],
@@ -192,6 +204,7 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       uiContractCount: UI_CONTRACTS.length,
       uiSeedCount: UI_SEEDS.length,
       e2eEvidence: latestE2eEvidence(store, coach.organizationId),
+      voiceEvidence: voiceEvidenceFor(store, coach.organizationId),
       confirmedIngestionCount: ingestions.filter((item) => item.state === "CONFIRMED").length,
       ingestionChannelsObserved: ingestions.map((item) => String(item.channel ?? "")),
       auditableOriginalFormatsObserved: [...new Set(ingestions.map((item) => extname(String(item.sourceName ?? "")).slice(1).toLowerCase()).filter(Boolean))],
@@ -1176,5 +1189,124 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       publishedRemainsImmutable: true,
       note: `v${nextVersion} criada como PENDING_APPROVAL; o snapshot publicado v${current.version} não foi alterado.`,
     });
+  });
+
+  /**
+   * Pipeline de pós-treino por voz (G11/G26, manual §16/§21):
+   * LOCAL → DRAFT → REVIEW → VALIDATED → CONFIRMED → COMMIT.
+   * O áudio nunca executa ação diretamente; transcript é imutável.
+   */
+  app.post("/api/v1/rkf/voice/ingestions", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
+    if (!request.isMultipart()) {
+      const body = z.object({ title: z.string().min(2), transcript: z.string().min(3).optional(), provider: z.string().default("manual"), confidence: z.number().min(0).max(1).default(0.9) }).safeParse(request.body);
+      if (!body.success) return reply.code(400).send({ error: "Ingestão de voz inválida", details: body.error.flatten() });
+      // Criação direta com transcrição manual (canal VOICE declarado): o registro nasce em LOCAL e a transcrição segue imutável.
+      const audioHash = createHash("sha256").update(`voice:${body.data.title}:${coach.id}`).digest("hex");
+      const record = store.create("ingestions", {
+        title: body.data.title,
+        channel: "VOICE",
+        sourceName: "ditado-transcrito",
+        original: body.data.transcript ?? "audio:ditado-pendente",
+        originalHash: audioHash,
+        voiceState: "LOCAL",
+        transcript: null,
+        extraction: null,
+        corrections: 0,
+        sttStatus: body.data.transcript ? "MANUAL" : "PENDING",
+        state: "REVIEW",
+        status: "review",
+        version: 1,
+        pipeline: ["RECEIVED", "STORED"],
+        organizationId: coach.organizationId,
+        actorId: coach.id,
+      }, "upload");
+      if (body.data.transcript) {
+        const attached = attachTranscript(store, record.id, { text: body.data.transcript, provider: body.data.provider, confidence: body.data.confidence });
+        if ("record" in attached) return reply.code(201).send(attached.record);
+      }
+      return reply.code(201).send(record);
+    }
+    const file = await request.file();
+    if (!file) return reply.code(400).send({ error: "Envie o áudio no campo file" });
+    const buffer = await file.toBuffer();
+    if (buffer.length > 25 * 1024 * 1024) return reply.code(413).send({ error: "Áudio deve ter no máximo 25 MB" });
+    const extension = extname(file.filename).toLowerCase();
+    if (![".mp3", ".m4a", ".wav", ".ogg", ".webm"].includes(extension)) return reply.code(415).send({ error: `Formato de áudio ${extension || "desconhecido"} não suportado` });
+    const titleField = Array.isArray(file.fields.title) ? file.fields.title[0] : file.fields.title;
+    const title = typeof titleField === "string" ? titleField : String((titleField as { value?: string } | undefined)?.value ?? `Ditado de voz · ${file.filename}`);
+    const record = createVoiceIngestion(store, { audio: buffer, filename: file.filename, mime: file.mimetype, organizationId: coach.organizationId, actorId: coach.id, title });
+    // Sem STT configurado o registro permanece LOCAL/DRAFT com sttStatus PENDING (nunca inventa transcrição).
+    return reply.code(201).send({ ...record, note: "Áudio armazenado com hash. Envie a transcrição em /voice/ingestions/:id/transcript; sem STT o registro permanece PENDING." });
+  });
+
+  app.post("/api/v1/rkf/voice/ingestions/:id/transcript", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const body = z.object({ text: z.string().min(3), provider: z.string().default("stt"), confidence: z.number().min(0).max(1).default(0.8) }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "Transcrição inválida", details: body.error.flatten() });
+    const record = store.get("ingestions", id);
+    if (!record || record.organizationId !== coach.organizationId || record.channel !== "VOICE") return reply.code(404).send({ error: "Ingestão de voz não encontrada" });
+    const result = attachTranscript(store, id, body.data);
+    if ("error" in result) {
+      if (result.error === "immutable") return reply.code(409).send({ error: "Transcrição é imutável (VAL-014)", existing: result.existing });
+      return reply.code(404).send({ error: "Ingestão não encontrada" });
+    }
+    return reply.code(200).send(result.record);
+  });
+
+  app.patch("/api/v1/rkf/voice/ingestions/:id/extraction", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const body = z.object({
+      athleteId: z.string().optional(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      pse: z.number().min(0).max(10).optional(), durationMinutes: z.number().positive().optional(),
+      executedVolumeM: z.number().nonnegative().optional(), pain: z.number().min(0).max(10).optional(),
+      technique: z.number().min(1).max(5).optional(), note: z.string().max(500).optional(), correctionNote: z.string().max(500).optional(),
+    }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "Correção inválida", details: body.error.flatten() });
+    const { correctionNote, ...patch } = body.data;
+    const result = correctExtraction(store, id, patch as Partial<VoiceExtraction>, correctionNote);
+    if ("error" in result) {
+      if (result.error === "immutable") return reply.code(409).send({ error: "Registro confirmado é imutável. Use nova versão." });
+      if (result.error === "no_transcript") return reply.code(409).send({ error: "Sem transcrição não há extração a corrigir" });
+      return reply.code(404).send({ error: "Ingestão não encontrada" });
+    }
+    return reply.code(200).send(result.record);
+  });
+
+  app.post("/api/v1/rkf/voice/ingestions/:id/confirm", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const result = confirmVoiceIngestion(store, id, coach.id);
+    if ("error" in result) {
+      if (result.error === "missing_critical") return reply.code(422).send({ error: "Campos críticos incompletos na extração", missing: result.missing });
+      if (result.error === "invalid_ranges") return reply.code(422).send({ error: "Ranges inválidos", violations: result.violations });
+      if (result.error === "no_transcript" || result.error === "no_extraction") return reply.code(409).send({ error: "Confirme a transcrição antes" });
+      if (result.error === "already_committed") return reply.code(409).send({ error: "Já commitada" });
+      return reply.code(404).send({ error: "Ingestão não encontrada" });
+    }
+    return reply.code(200).send(result.record);
+  });
+
+  app.post("/api/v1/rkf/voice/ingestions/:id/commit", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const result = commitVoiceIngestion(store, id, coach.id);
+    if ("error" in result) {
+      if (result.error === "not_confirmed") return reply.code(409).send({ error: "Commit exige confirmação humana prévia (VAL-013)" });
+      return reply.code(404).send({ error: "Ingestão não encontrada" });
+    }
+    return reply.code(201).send({ ok: true, record: result.record, activity: result.activity, pipeline: VOICE_PIPELINE_VERSION });
   });
 }

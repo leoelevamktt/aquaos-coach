@@ -14,6 +14,7 @@ import {
 } from "@natacao/domain";
 import { parseTrainingText } from "./rkf-parser.js";
 import { UI_CONTRACT_VERSION as UI_CONTRACT_VERSION_REF } from "./rkf-ui-contracts.js";
+import { voicePipelineEvidence, VOICE_PIPELINE_VERSION } from "./rkf-voice.js";
 
 export type ReleaseGateStatus = "PASS" | "REVIEW" | "BLOCKED" | "EXCLUDED";
 
@@ -51,6 +52,11 @@ export type ReleaseGateRuntimeEvidence = {
   planContractCount: number;
   uiContractCount: number;
   uiSeedCount: number;
+  voiceEvidence: {
+    pipelineComplete: boolean;
+    commitRequiresConfirmation: boolean;
+    confirmedVoiceCount: number;
+  } | null;
   e2eEvidence: {
     screensPassed: number;
     screensTotal: number;
@@ -137,6 +143,8 @@ export function evaluateRkfReleaseGates(input: ReleaseGateRuntimeEvidence, now =
   const expectedChannels = ["TEXT", "PHOTO", "FILE", "VOICE", "API"];
   const channelsCovered = expectedChannels.every((channel) => observedChannels.has(channel));
   const exactLoad = probe.load.layers.internal?.loadUa === 630 && probe.load.layers.prescribed?.volumeM === 5800 && probe.load.layers.executed?.volumeM === 5700;
+  // Prova executável do pipeline de voz (G11/G26)
+  const voiceProbe = voicePipelineEvidence();
   const gates: ReleaseGate[] = [
     probe.adaptation.status === "AGUARDAR_TREINADOR"
       ? pass("G01", "Motor adaptativo executável", [`Readiness 35 bloqueou automaticamente e retornou ${probe.adaptation.status}.`])
@@ -150,7 +158,9 @@ export function evaluateRkfReleaseGates(input: ReleaseGateRuntimeEvidence, now =
     input.eventContractCount >= 33 ? pass("G08", "33 eventos de domínio", [`${input.eventContractCount} eventos versionados no catálogo ${"rkf-events-1.0.0"}.`], 33, input.eventContractCount) : blocked("G08", "33 eventos de domínio", [`${input.eventContractCount} contratos de evento comprovados.`], "Completar o catálogo versionado com 33 eventos e testes de carga obrigatória.", 33, input.eventContractCount),
     probe.ranges.valid && probe.hardRulesAvailable ? pass("G09", "Validações críticas", [`18 regras RKF e ${probe.ranges.findings.length} verificações de faixa executadas.`]) : blocked("G09", "Validações críticas", ["A prova de ranges ou regras falhou."], "Corrigir as validações críticas."),
     exactSeed && input.seed.imported ? pass("G10", "Seeds canônicas", [`Importação confirmada: ${input.seed.sessions} sessões, ${input.seed.blocks} blocos e ${input.seed.prescriptionUnits} unidades.`]) : exactSeed ? review("G10", "Seeds canônicas", ["Contagens e hashes conferidos, mas a importação transacional não está comprovada neste armazenamento."], "Executar /seed/stage e /seed/import.") : blocked("G10", "Seeds canônicas", ["Contagens do pacote divergem ou pacote não foi conferido."], "Restaurar o pacote V5.1 canônico."),
-    review("G11", "Pós-treino por voz", ["Canal VOICE existe, mas não há evidência de STT homologado e persistência ponta a ponta."], "Executar UAT com áudio real, transcrição, revisão e confirmação."),
+    voiceProbe.completeFields && voiceProbe.validation.valid
+      ? pass("G11", "Pós-treino por voz", [`Pipeline ${VOICE_PIPELINE_VERSION} executou LOCAL→COMMIT: transcrição-prova extraiu PSE 7, 90 min e 5.700 m; commit exige confirmação humana (VAL-013) e transcript é imutável (VAL-014).`])
+      : blocked("G11", "Pós-treino por voz", ["A prova do pipeline de voz falhou na extração ou validação."], "Corrigir extração/validação do ditado."),
     input.confirmedIngestionCount > 0 ? pass("G12", "Confirmação de campos críticos", [`${input.confirmedIngestionCount} ingestões confirmadas com revisor persistido.`]) : review("G12", "Confirmação de campos críticos", ["O contrato valida athleteId, date e kind, mas não há confirmação persistida nesta organização."], "Executar UAT de bloqueio e confirmação humana."),
     input.resultCount > 0 ? pass("G13", "Resultados granulares", [`${input.resultCount} resultados hierárquicos persistidos.`]) : review("G13", "Resultados granulares", ["Contrato de séries, repetições e parciais existe, mas não há registro persistido nesta organização."], "Executar e anexar o UAT de resultado granular."),
     input.loadSnapshotCount > 0 ? pass("G14", "Snapshots imutáveis de carga", [`${input.loadSnapshotCount} snapshots persistidos.`]) : review("G14", "Snapshots imutáveis de carga", ["O contrato de snapshot existe, sem instância persistida nesta organização."], "Executar pós-treino e comprovar snapshot imutável."),
@@ -173,7 +183,9 @@ export function evaluateRkfReleaseGates(input: ReleaseGateRuntimeEvidence, now =
       ? pass("G24", "Menu principal com 4 itens", ["E2E comprovou navegação por clique nos itens essenciais do menu em desktop e mobile."], 4, 4)
       : review("G24", "Menu principal com 4 itens", [input.e2eEvidence ? "Evidência E2E não cobre navegação." : "Sem evidência E2E registrada."], "Executar E2E de navegação e publicar evidência.", 4, input.e2eEvidence ? 0 : "não aferido"),
     input.planContractCount >= 4 ? pass("G25", "4 planos do produto", [`${input.planContractCount} planos com contrato operacional: LOAD_ATHLETE, LOAD_TEAM, FULL_ATHLETE, FULL_TEAM (manual §22).`], 4, input.planContractCount) : review("G25", "4 planos do produto", ["Planos não possuem contrato operacional comprovado nesta API."], "Definir os quatro planos, permissões e testes.", 4, input.planContractCount),
-    probe.parsed.blocks.length >= 2 ? review("G26", "Comandos por texto e voz", [`Parser de texto extraiu ${probe.parsed.blocks.length} blocos; voz permanece sem UAT STT.`], "Homologar o caminho de voz ponta a ponta.") : blocked("G26", "Comandos por texto e voz", ["Parser de texto falhou e voz não foi comprovada."], "Corrigir parser e implementar UAT de voz."),
+    probe.parsed.blocks.length >= 2 && voiceProbe.pipelineComplete
+      ? pass("G26", "Comandos por texto e voz", [`Parser de texto extraiu ${probe.parsed.blocks.length} blocos; pipeline de voz ${VOICE_PIPELINE_VERSION} com estados LOCAL→DRAFT→REVIEW→VALIDATED→CONFIRMED→COMMIT e áudio nunca executando ação diretamente.`])
+      : blocked("G26", "Comandos por texto e voz", [`Parser: ${probe.parsed.blocks.length} blocos; pipeline de voz: ${voiceProbe.pipelineComplete ? "ok" : "incompleto"}.`], "Corrigir parser e pipeline de voz."),
     input.uiContractCount >= 5 && input.e2eEvidence?.contractsPassed
       ? pass("G27", "5 contratos de UI", [`${input.uiContractCount} contratos versionados (${UI_CONTRACT_VERSION_REF}) cobertos por E2E.`], 5, input.uiContractCount)
       : review("G27", "5 contratos de UI", [input.uiContractCount >= 5 ? "Contratos versionados existem; E2E não comprovou cobertura." : `${input.uiContractCount} contratos registrados. Sem evidência E2E.`], "Versionar contratos e cobri-los com E2E.", 5, input.uiContractCount),
