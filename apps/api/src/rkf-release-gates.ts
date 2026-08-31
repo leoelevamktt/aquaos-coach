@@ -13,6 +13,7 @@ import {
   FATIGUE_ENGINE_VERSION,
 } from "@natacao/domain";
 import { parseTrainingText } from "./rkf-parser.js";
+import { UI_CONTRACT_VERSION as UI_CONTRACT_VERSION_REF } from "./rkf-ui-contracts.js";
 
 export type ReleaseGateStatus = "PASS" | "REVIEW" | "BLOCKED" | "EXCLUDED";
 
@@ -48,6 +49,17 @@ export type ReleaseGateRuntimeEvidence = {
   ingestionSeedCount: number;
   ingestionContractCount: number;
   planContractCount: number;
+  uiContractCount: number;
+  uiSeedCount: number;
+  e2eEvidence: {
+    screensPassed: number;
+    screensTotal: number;
+    navigationPassed: boolean;
+    contractsPassed: boolean;
+    seedsPassed: boolean;
+    desktop: boolean;
+    mobile: boolean;
+  } | null;
   confirmedIngestionCount: number;
   ingestionChannelsObserved: string[];
   auditableOriginalFormatsObserved: string[];
@@ -154,12 +166,20 @@ export function evaluateRkfReleaseGates(input: ReleaseGateRuntimeEvidence, now =
       : blocked("G20", "Recuperação por fase", ["A matriz por fase não retornou o comportamento esperado."], "Corrigir a matriz PHASE_RECOVERY_MATRIX."),
     probe.adaptation.removedElements.includes("AN2") ? pass("G21", "Guardrails clínico-operacionais", [`Classe ${probe.adaptation.class} removeu ${probe.adaptation.removedElements.join(", ")} e exigiu treinador.`]) : blocked("G21", "Guardrails clínico-operacionais", ["Cenário de bloqueio não removeu intensidade crítica."], "Corrigir guardrails."),
     input.fatigueSeedCount > 0 ? pass("G22", "Seeds de fadiga", [`${input.fatigueSeedCount} decisões de fadiga persistidas com contexto de especialidade.`]) : review("G22", "Seeds de fadiga", ["Motor e cenários-prova executam, mas nenhuma decisão de fadiga está persistida nesta organização."], "Executar /fatigue/assess com persistência."),
-    review("G23", "8 telas obrigatórias", ["A API não consegue provar renderização, responsividade e ações das telas."], "Anexar execução E2E das oito telas em desktop e mobile.", 8, "não aferido"),
-    review("G24", "Menu principal com 4 itens", ["Estrutura visual não é evidência verificável pela API."], "Cobrir navegação e permissões com E2E.", 4, "não aferido"),
+    input.e2eEvidence && input.e2eEvidence.screensTotal >= 8 && input.e2eEvidence.screensPassed === input.e2eEvidence.screensTotal && input.e2eEvidence.desktop && input.e2eEvidence.mobile
+      ? pass("G23", "8 telas obrigatórias", [`E2E executado: ${input.e2eEvidence.screensPassed}/${input.e2eEvidence.screensTotal} telas renderizaram em desktop e mobile.`], 8, input.e2eEvidence.screensPassed)
+      : review("G23", "8 telas obrigatórias", [input.e2eEvidence ? `E2E parcial: ${input.e2eEvidence.screensPassed}/${input.e2eEvidence.screensTotal} telas (desktop=${input.e2eEvidence.desktop}, mobile=${input.e2eEvidence.mobile}).` : "Sem evidência E2E registrada."], "Publicar evidência via /rkf/ui/e2e-evidence com as oito telas em desktop e mobile.", 8, input.e2eEvidence?.screensPassed ?? "não aferido"),
+    input.e2eEvidence?.navigationPassed
+      ? pass("G24", "Menu principal com 4 itens", ["E2E comprovou navegação por clique nos itens essenciais do menu em desktop e mobile."], 4, 4)
+      : review("G24", "Menu principal com 4 itens", [input.e2eEvidence ? "Evidência E2E não cobre navegação." : "Sem evidência E2E registrada."], "Executar E2E de navegação e publicar evidência.", 4, input.e2eEvidence ? 0 : "não aferido"),
     input.planContractCount >= 4 ? pass("G25", "4 planos do produto", [`${input.planContractCount} planos com contrato operacional: LOAD_ATHLETE, LOAD_TEAM, FULL_ATHLETE, FULL_TEAM (manual §22).`], 4, input.planContractCount) : review("G25", "4 planos do produto", ["Planos não possuem contrato operacional comprovado nesta API."], "Definir os quatro planos, permissões e testes.", 4, input.planContractCount),
     probe.parsed.blocks.length >= 2 ? review("G26", "Comandos por texto e voz", [`Parser de texto extraiu ${probe.parsed.blocks.length} blocos; voz permanece sem UAT STT.`], "Homologar o caminho de voz ponta a ponta.") : blocked("G26", "Comandos por texto e voz", ["Parser de texto falhou e voz não foi comprovada."], "Corrigir parser e implementar UAT de voz."),
-    review("G27", "5 contratos de UI", ["Nenhum manifesto executável dos contratos de UI foi fornecido à API."], "Versionar contratos e cobri-los com testes de componente/E2E.", 5, "não aferido"),
-    review("G28", "Seeds de UI", ["Há dados demonstrativos, mas não existe catálogo de seeds de UI vinculado aos casos do manual."], "Criar fixtures nomeadas para vazios, dados antigos, erros e sucesso."),
+    input.uiContractCount >= 5 && input.e2eEvidence?.contractsPassed
+      ? pass("G27", "5 contratos de UI", [`${input.uiContractCount} contratos versionados (${UI_CONTRACT_VERSION_REF}) cobertos por E2E.`], 5, input.uiContractCount)
+      : review("G27", "5 contratos de UI", [input.uiContractCount >= 5 ? "Contratos versionados existem; E2E não comprovou cobertura." : `${input.uiContractCount} contratos registrados. Sem evidência E2E.`], "Versionar contratos e cobri-los com E2E.", 5, input.uiContractCount),
+    input.uiSeedCount >= 7 && input.e2eEvidence?.seedsPassed
+      ? pass("G28", "Seeds de UI", [`${input.uiSeedCount} seeds nomeadas para os sete estados do manual (§22), cobertura E2E confirmada.`], 7, input.uiSeedCount)
+      : review("G28", "Seeds de UI", [input.uiSeedCount >= 7 ? "Seeds nomeadas existem para os sete estados; E2E não comprovou cobertura." : `${input.uiSeedCount} seeds registradas.`], "Criar fixtures nomeadas e cobri-las com E2E.", 7, input.uiSeedCount),
     channelsCovered ? pass("G29", "5 canais de ingestão", [`Canais observados: ${expectedChannels.join(", ")}.`], 5, expectedChannels.length) : review("G29", "5 canais de ingestão", [`Observados: ${[...observedChannels].join(", ") || "nenhum"}.`], "Executar pelo menos uma ingestão confirmada por canal.", 5, expectedChannels.filter((channel) => observedChannels.has(channel)).length),
     input.auditableOriginalFormatsObserved.length >= 6 ? pass("G30", "6 originais auditáveis", [`Formatos com original e hash: ${input.auditableOriginalFormatsObserved.join(", ")}.`], 6, input.auditableOriginalFormatsObserved.length) : review("G30", "6 originais auditáveis", [`Formatos observados com prova: ${input.auditableOriginalFormatsObserved.join(", ") || "nenhum"}.`], "Persistir seis originais, hashes e cadeia de revisão.", 6, input.auditableOriginalFormatsObserved.length),
     probe.parsed.blocks.length >= 2 && probe.parsed.totalVolumeM === 1800 ? pass("G31", "Parser RKF", [`Texto-prova produziu ${probe.parsed.blocks.length} blocos e ${probe.parsed.totalVolumeM} m sem inventar campos.`]) : blocked("G31", "Parser RKF", [`Resultado inesperado: ${probe.parsed.blocks.length} blocos, ${String(probe.parsed.totalVolumeM)} m.`], "Corrigir parser conservador."),

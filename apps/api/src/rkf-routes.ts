@@ -14,6 +14,7 @@ import { openapi } from "./openapi.js";
 import { evaluateRkfReleaseGates } from "./rkf-release-gates.js";
 import { DOMAIN_EVENT_CONTRACTS, DOMAIN_EVENT_CATALOG_VERSION } from "./domain-events.js";
 import { applyIngestionSeeds, INGESTION_CONTRACTS, INGESTION_SEEDS, INGESTION_SEED_VERSION, PRODUCT_PLANS, plansForRole, type IngestionSeedExecution } from "./rkf-ingestion-seeds.js";
+import { UI_CONTRACTS, UI_SEEDS, UI_CONTRACT_VERSION, uiSeedStateCoverage } from "./rkf-ui-contracts.js";
 import {
   AGE_BANDS, buildLoadAlerts, classifyEvolution, coldStartFor, computeChronicSeries,
   computeLoadLayers, computeMonotony, computeResponseIndex, decideAdaptation, DISTRIBUTION_MATRICES,
@@ -77,6 +78,25 @@ function validationSessions() {
   }));
 }
 
+type E2eEvidenceShape = {
+  screensPassed: number;
+  screensTotal: number;
+  navigationPassed: boolean;
+  contractsPassed: boolean;
+  seedsPassed: boolean;
+  desktop: boolean;
+  mobile: boolean;
+};
+
+function latestE2eEvidence(store: ManagedStore | undefined, organizationId: string): E2eEvidenceShape | null {
+  const evidences = (store?.list("governance") ?? [])
+    .filter((item) => item.organizationId === organizationId && item.e2eEvidence)
+    .map((item) => item.e2eEvidence as unknown as E2eEvidenceShape & { recordedAt: string });
+  if (!evidences.length) return null;
+  evidences.sort((a, b) => String(b.recordedAt ?? "").localeCompare(String(a.recordedAt ?? "")));
+  return evidences[0];
+}
+
 export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
   app.get("/api/v1/rkf/bootstrap", async (request) => {
     const viewer = await getSession(sessionToken(request));
@@ -112,10 +132,13 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       resultCount: (store?.list("results") ?? []).filter((item) => item.organizationId === organizationId).length,
       loadSnapshotCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === organizationId).length,
       postTrainingSeedCount: validationSessions().length,
-  fatigueSeedCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === organizationId && item.fatigueContext).length + (store?.list("adaptationDecisions") ?? []).filter((item) => item.organizationId === organizationId && item.fatigueContext).length,
-  ingestionSeedCount: (store?.list("ingestions") ?? []).filter((item) => item.organizationId === organizationId && item.seedVersion === INGESTION_SEED_VERSION).length,
-  ingestionContractCount: INGESTION_CONTRACTS.length,
-  planContractCount: PRODUCT_PLANS.length,
+      fatigueSeedCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === organizationId && item.fatigueContext).length + (store?.list("adaptationDecisions") ?? []).filter((item) => item.organizationId === organizationId && item.fatigueContext).length,
+      ingestionSeedCount: (store?.list("ingestions") ?? []).filter((item) => item.organizationId === organizationId && item.seedVersion === INGESTION_SEED_VERSION).length,
+      ingestionContractCount: INGESTION_CONTRACTS.length,
+      planContractCount: PRODUCT_PLANS.length,
+      uiContractCount: UI_CONTRACTS.length,
+      uiSeedCount: UI_SEEDS.length,
+      e2eEvidence: latestE2eEvidence(store, organizationId),
       confirmedIngestionCount: ingestions.filter((item) => item.state === "CONFIRMED").length,
       ingestionChannelsObserved: ingestions.map((item) => String(item.channel ?? "")),
       auditableOriginalFormatsObserved: [...new Set(ingestions.map((item) => extname(String(item.sourceName ?? "")).slice(1).toLowerCase()).filter(Boolean))],
@@ -162,10 +185,13 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       resultCount: (store?.list("results") ?? []).filter((item) => item.organizationId === coach.organizationId).length,
       loadSnapshotCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === coach.organizationId).length,
       postTrainingSeedCount: validationSessions().length,
-  fatigueSeedCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === coach.organizationId && item.fatigueContext).length + (store?.list("adaptationDecisions") ?? []).filter((item) => item.organizationId === coach.organizationId && item.fatigueContext).length,
-  ingestionSeedCount: (store?.list("ingestions") ?? []).filter((item) => item.organizationId === coach.organizationId && item.seedVersion === INGESTION_SEED_VERSION).length,
-  ingestionContractCount: INGESTION_CONTRACTS.length,
-  planContractCount: PRODUCT_PLANS.length,
+      fatigueSeedCount: (store?.list("loadSnapshots") ?? []).filter((item) => item.organizationId === coach.organizationId && item.fatigueContext).length + (store?.list("adaptationDecisions") ?? []).filter((item) => item.organizationId === coach.organizationId && item.fatigueContext).length,
+      ingestionSeedCount: (store?.list("ingestions") ?? []).filter((item) => item.organizationId === coach.organizationId && item.seedVersion === INGESTION_SEED_VERSION).length,
+      ingestionContractCount: INGESTION_CONTRACTS.length,
+      planContractCount: PRODUCT_PLANS.length,
+      uiContractCount: UI_CONTRACTS.length,
+      uiSeedCount: UI_SEEDS.length,
+      e2eEvidence: latestE2eEvidence(store, coach.organizationId),
       confirmedIngestionCount: ingestions.filter((item) => item.state === "CONFIRMED").length,
       ingestionChannelsObserved: ingestions.map((item) => String(item.channel ?? "")),
       auditableOriginalFormatsObserved: [...new Set(ingestions.map((item) => extname(String(item.sourceName ?? "")).slice(1).toLowerCase()).filter(Boolean))],
@@ -943,6 +969,49 @@ export function registerRkfRoutes(app: FastifyInstance, store?: ManagedStore) {
       plans: PRODUCT_PLANS,
       availableToRole: plansForRole(user.role === "athlete" ? "athlete" : "coach"),
     };
+  });
+
+  /** G27/G28: contratos e seeds de UI versionados (manual §22). */
+  app.get("/api/v1/rkf/ui/contracts", async (request, reply) => {
+    const user = await requireAuthenticated(request, reply);
+    if (!user) return;
+    return { version: UI_CONTRACT_VERSION, contracts: UI_CONTRACTS, seeds: UI_SEEDS, stateCoverage: uiSeedStateCoverage() };
+  });
+
+  /**
+   * Evidência E2E (G23/G24/G27/G28): a suíte Playwright publica aqui o
+   * resultado da execução; os gates leem a evidência registrada.
+   */
+  app.post("/api/v1/rkf/ui/e2e-evidence", async (request, reply) => {
+    const coach = await requireCoach(request, reply);
+    if (!coach) return;
+    if (!store) return reply.code(503).send({ error: "Persistência RKF indisponível" });
+    const body = z.object({
+      suite: z.string().min(2),
+      screens: z.array(z.object({ id: z.string(), passed: z.boolean() })).default([]),
+      navigationPassed: z.boolean().default(false),
+      contractsPassed: z.boolean().default(false),
+      seedsPassed: z.boolean().default(false),
+      desktop: z.boolean().default(true),
+      mobile: z.boolean().default(false),
+    }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "Evidência E2E inválida", details: body.error.flatten() });
+    const evidence = {
+      id: `e2e-${Date.now().toString(36)}`,
+      suite: body.data.suite,
+      screens: body.data.screens,
+      screensPassed: body.data.screens.filter((screen) => screen.passed).length,
+      screensTotal: body.data.screens.length,
+      navigationPassed: body.data.navigationPassed,
+      contractsPassed: body.data.contractsPassed,
+      seedsPassed: body.data.seedsPassed,
+      desktop: body.data.desktop,
+      mobile: body.data.mobile,
+      recordedAt: new Date().toISOString(),
+      recordedBy: coach.id,
+    };
+    store.create("governance", { id: evidence.id, name: `Evidência E2E · ${body.data.suite}`, status: "e2e", e2eEvidence: evidence, organizationId: coach.organizationId, actorId: coach.id });
+    return reply.code(201).send(evidence);
   });
 
   /** G35: os 8 contratos de ingestão nomeados com o que cada um prova. */

@@ -21,3 +21,6 @@ Thumbs.db
 # Temporários
 .tmp-*/
 .claude/
+
+apps/web/test-results/
+apps/web/playwright-report/
