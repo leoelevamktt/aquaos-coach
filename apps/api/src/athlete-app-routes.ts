@@ -223,13 +223,27 @@ function aggregate(store: ManagedStore, demo: DemoStore, athleteId: string, orga
   const load = store.list("loadSnapshots").filter(own);
   const activities = store.list("activities").filter(own);
   const results = store.list("results").filter(own);
-  const targetDate = datePattern.test(String(athlete.meetDate ?? "")) ? String(athlete.meetDate) : undefined;
+  const athleteTargetMeet = String(athlete.targetMeet ?? "").trim();
+  const meetRecords = store.list("meets")
+    .filter((item) => item.organizationId === organizationId);
+  const targetMeet = meetRecords.find((meet) =>
+    meet.id === athleteTargetMeet || meet.name === athleteTargetMeet)
+    ?? (!athleteTargetMeet
+      ? meetRecords
+        .filter((meet) => datePattern.test(String(meet.startsOn ?? "")) && String(meet.startsOn) >= date)
+        .sort((left, right) => String(left.startsOn).localeCompare(String(right.startsOn)))[0]
+      : undefined);
+  const targetDate = datePattern.test(String(athlete.meetDate ?? ""))
+    ? String(athlete.meetDate)
+    : datePattern.test(String(targetMeet?.startsOn ?? ""))
+      ? String(targetMeet?.startsOn)
+      : undefined;
   const season = store.list("seasons").find((item) => item.organizationId === organizationId && item.status === "active");
   const phaseStart = datePattern.test(String(season?.startsOn ?? "")) ? String(season?.startsOn) : range.start;
   const phaseEnd = targetDate ?? (datePattern.test(String(season?.endsOn ?? "")) ? String(season?.endsOn) : range.end);
   const elapsedWeeks = Math.max(0, Math.floor((new Date(`${date}T12:00:00Z`).getTime() - new Date(`${phaseStart}T12:00:00Z`).getTime()) / 604_800_000));
   const totalWeeks = Math.max(1, Math.ceil((new Date(`${phaseEnd}T12:00:00Z`).getTime() - new Date(`${phaseStart}T12:00:00Z`).getTime()) / 604_800_000));
-  const meets = store.list("meets").filter((item) => item.organizationId === organizationId).map((meet) => ({
+  const meets = meetRecords.map((meet) => ({
     id: meet.id,
     name: meet.name ?? meet.title,
     startsOn: meet.startsOn,
@@ -237,7 +251,7 @@ function aggregate(store: ManagedStore, demo: DemoStore, athleteId: string, orga
     priority: meet.priority,
     pool: meet.pool,
     status: meet.status,
-    target: meet.id === athlete.targetMeet || meet.name === athlete.targetMeet,
+    target: meet.id === targetMeet?.id,
   }));
   const weekSessions = weekAssignments.map(({ prescription, workout }) => ({
     id: workout.id,
@@ -294,7 +308,7 @@ function aggregate(store: ManagedStore, demo: DemoStore, athleteId: string, orga
       totalWeeks,
       startsOn: phaseStart,
       endsOn: phaseEnd,
-      targetMeet: athlete.targetMeet ?? meets.find((meet) => meet.target)?.name ?? null,
+      targetMeet: athleteTargetMeet || targetMeet?.name || null,
     },
     today: {
       status: completedToday ? "completed" : checkIn ? "ready" : "check-in-pending",

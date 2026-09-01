@@ -157,7 +157,7 @@ export function Team({ onInvite, onAthlete, onNotify, liveVersion = 0 }: { onInv
         <span className="athlete-person"><Avatar initials={athlete.initials} color={athlete.color} /><span><b>{athlete.name}</b><small>{athlete.handle} · {athlete.group}</small></span>{athlete.account !== "active" && <i>{athlete.account === "invited" ? "Convite pendente" : "Sem conta"}</i>}</span>
         <span>{athlete.goalEvent ? <><b>{athlete.goalEvent}</b><small>{athlete.bestTime} → {athlete.goalTime}</small></> : <><b className="muted">Sem meta</b><small>Cadastre um objetivo</small></>}</span>
         <span>{athlete.readiness ? <><ProgressRing value={athlete.readiness} size="small" /><small>{athlete.lastBodySync}</small></> : <><StatusDot tone="muted" /><small>Sem wearable</small></>}</span>
-        <span><b>{formatNumber(athlete.weeklyDistance)} m</b><small className={athlete.weeklyDistance >= athlete.previousDistance ? "positive" : "negative"}>{athlete.weeklyDistance >= athlete.previousDistance ? "↑" : "↓"} {Math.abs(Math.round((athlete.weeklyDistance / athlete.previousDistance - 1) * 100))}%</small></span>
+        <span><b>{formatNumber(athlete.weeklyDistance)} m</b>{athlete.previousDistance > 0 ? <small className={athlete.weeklyDistance >= athlete.previousDistance ? "positive" : "negative"}>{athlete.weeklyDistance >= athlete.previousDistance ? "↑" : "↓"} {Math.abs(Math.round((athlete.weeklyDistance / athlete.previousDistance - 1) * 100))}%</small> : <small>Sem histórico</small>}</span>
         <span><b>{athlete.attendance}%</b><span className="inline-progress"><i style={{ width: `${athlete.attendance}%` }} /></span></span><ArrowRight size={16} />
       </button>)}</div>
     </section>

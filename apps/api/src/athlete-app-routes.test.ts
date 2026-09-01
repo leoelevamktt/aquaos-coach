@@ -29,6 +29,11 @@ describe("app do atleta", () => {
     expect(response.json()).toMatchObject({
       athlete: { id: "ana-souza", name: "Ana Souza" },
       date: "2026-09-01",
+      phase: {
+        totalWeeks: 7,
+        endsOn: "2026-09-18",
+        targetMeet: "Troféu Brasil - José Finkel",
+      },
       today: { status: "check-in-pending" },
     });
     expect(response.json().today.session.blocks.length).toBeGreaterThan(0);
