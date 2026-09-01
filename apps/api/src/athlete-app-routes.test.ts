@@ -421,6 +421,57 @@ describe("app do atleta", () => {
     });
   });
 
+  it("rejeita vínculos de sessão e competição fora do acesso do atleta", async () => {
+    const resultPayload = {
+      event: "100 m Livre",
+      poolLengthM: 50,
+      sessionDistanceM: 100,
+      durationMinutes: 1,
+      pse: 8,
+      sets: [{
+        set: 1,
+        label: "Resultado",
+        repetitions: [{
+          repetition: 1,
+          distanceM: 100,
+          timeSeconds: 60,
+          stroke: "livre",
+          splits: [],
+        }],
+      }],
+    };
+    const result = await app.inject({
+      method: "POST",
+      url: "/api/v1/athlete/results",
+      headers: { cookie: athleteCookie },
+      payload: {
+        ...resultPayload,
+        prescriptionId: "prescription-from-another-athlete",
+      },
+    });
+    const meetResult = await app.inject({
+      method: "POST",
+      url: "/api/v1/athlete/results",
+      headers: { cookie: athleteCookie },
+      payload: { ...resultPayload, meetId: "meet-from-another-organization" },
+    });
+    const checkout = await app.inject({
+      method: "POST",
+      url: "/api/v1/athlete/checkout",
+      headers: { cookie: athleteCookie },
+      payload: {
+        prescriptionId: "prescription-from-another-athlete",
+        distanceMeters: 1000,
+        durationMinutes: 30,
+        pse: 6,
+      },
+    });
+
+    expect(result.statusCode).toBe(403);
+    expect(meetResult.statusCode).toBe(403);
+    expect(checkout.statusCode).toBe(403);
+  });
+
   it("conclui uma execução uma única vez", async () => {
     const payload = {
       date: "2026-09-01",
@@ -446,7 +497,6 @@ describe("app do atleta", () => {
       url: "/api/v1/athlete/checkout",
       headers: { cookie: athleteCookie },
       payload: {
-        prescriptionId: "prescription-evening",
         endedAt: "2026-09-02T01:30:00.000Z",
         distanceMeters: 2000,
         durationMinutes: 40,

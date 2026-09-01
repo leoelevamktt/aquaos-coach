@@ -311,6 +311,78 @@ function prescriptionTargetsAthlete(store: ManagedStore, prescription: ManagedRe
   return groupIds.includes(String(prescription.targetId));
 }
 
+function accessibleSessionIds(
+  store: ManagedStore,
+  demo: DemoStore,
+  athlete: ManagedRecord,
+  prescriptionId: string,
+) {
+  const prescription = store.get("prescriptions", prescriptionId);
+  if (
+    prescription
+    && prescription.organizationId === athlete.organizationId
+    && prescription.status === "PUBLISHED"
+    && prescriptionTargetsAthlete(store, prescription, athlete)
+  ) {
+    const embeddedId = embeddedPrescription(prescription)?.id;
+    return [
+      prescription.workoutId,
+      prescription.workoutTemplateId,
+      embeddedId,
+      embeddedId ? undefined : prescription.id,
+    ].filter((value): value is string => typeof value === "string");
+  }
+  const demoAthlete = demo.athletes.find((candidate) =>
+    candidate.email?.toLowerCase() === String(athlete.email ?? "").toLowerCase()
+    || candidate.name === athlete.name);
+  const demoPrescription = demo.prescriptions.find((candidate) =>
+    candidate.id === prescriptionId
+    && candidate.organizationId === athlete.organizationId
+    && !["cancelled", "completed"].includes(candidate.status)
+    && (
+      candidate.targetType === "team"
+      || (
+        candidate.targetType === "athlete"
+        && candidate.targetId === demoAthlete?.id
+      )
+      || (
+        candidate.targetType === "group"
+        && demoAthlete?.groupIds.includes(candidate.targetId)
+      )
+    ));
+  return demoPrescription ? [demoPrescription.workoutTemplateId] : [];
+}
+
+function athleteMayLinkRecord(
+  store: ManagedStore,
+  demo: DemoStore,
+  athlete: ManagedRecord,
+  prescriptionId?: string,
+  sessionId?: string,
+) {
+  if (prescriptionId) {
+    const sessionIds = accessibleSessionIds(
+      store,
+      demo,
+      athlete,
+      prescriptionId,
+    );
+    return sessionIds.length > 0 && (!sessionId || sessionIds.includes(sessionId));
+  }
+  if (!sessionId) return true;
+  return [
+    ...store.list("prescriptions")
+      .filter((prescription) =>
+        prescription.organizationId === athlete.organizationId
+        && prescription.status === "PUBLISHED"
+        && prescriptionTargetsAthlete(store, prescription, athlete))
+      .flatMap((prescription) =>
+        accessibleSessionIds(store, demo, athlete, prescription.id)),
+    ...demo.prescriptions.flatMap((prescription) =>
+      accessibleSessionIds(store, demo, athlete, prescription.id)),
+  ].includes(sessionId);
+}
+
 function personalizedWorkout<T extends WorkoutTemplate | ManagedRecord>(
   workout: T,
   athleteOverrides: unknown,
@@ -680,6 +752,27 @@ export function registerAthleteAppRoutes(app: FastifyInstance, store: ManagedSto
       })).min(1).max(30),
     }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "Resultado inválido", details: parsed.error.flatten() });
+    const athlete = store.get("athletes", user.athleteId!);
+    if (!athlete || athlete.organizationId !== user.organizationId) {
+      return reply.code(409).send({ error: "Perfil de atleta não vinculado" });
+    }
+    if (!athleteMayLinkRecord(
+      store,
+      demo,
+      athlete,
+      parsed.data.prescriptionId,
+      parsed.data.sessionId,
+    )) {
+      return reply.code(403).send({ error: "Sessão não autorizada para este atleta" });
+    }
+    if (
+      parsed.data.meetId
+      && !store.list("meets").some((meet) =>
+        meet.id === parsed.data.meetId
+        && meet.organizationId === user.organizationId)
+    ) {
+      return reply.code(403).send({ error: "Competição não autorizada para este atleta" });
+    }
     const date = parsed.data.date ?? localDate();
     const repetitions = parsed.data.sets.flatMap((set) => set.repetitions);
     const bestTimeSeconds = Math.min(...repetitions.map((item) => item.timeSeconds));
@@ -754,6 +847,19 @@ export function registerAthleteAppRoutes(app: FastifyInstance, store: ManagedSto
       notes: z.string().trim().max(2000).optional(),
     }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "Checkout inválido", details: parsed.error.flatten() });
+    const athlete = store.get("athletes", user.athleteId!);
+    if (!athlete || athlete.organizationId !== user.organizationId) {
+      return reply.code(409).send({ error: "Perfil de atleta não vinculado" });
+    }
+    if (!athleteMayLinkRecord(
+      store,
+      demo,
+      athlete,
+      parsed.data.prescriptionId,
+      parsed.data.sessionId,
+    )) {
+      return reply.code(403).send({ error: "Sessão não autorizada para este atleta" });
+    }
     const endedAt = parsed.data.endedAt ?? new Date().toISOString();
     const date = parsed.data.date ?? localDate(new Date(endedAt));
     const startedAt = parsed.data.startedAt ?? new Date(new Date(endedAt).getTime() - parsed.data.durationMinutes * 60_000).toISOString();
