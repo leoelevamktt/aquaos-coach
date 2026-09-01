@@ -43,8 +43,10 @@ async function loginAthlete(page: import("@playwright/test").Page) {
   await page.getByRole("textbox", { name: "E-mail ou CPF" }).fill(athleteEmail);
   await page.getByRole("textbox", { name: "Senha" }).fill(athletePassword);
   await page.getByRole("button", { name: /^Entrar$/ }).click();
-  await expect(page).toHaveURL(/\/pt\/athlete\/checkin/);
-  await page.getByRole("button", { name: "Iniciar meu dia" }).click();
+  await expect(page).toHaveURL(/\/pt\/athlete\/(checkin|home)/);
+  if (page.url().includes("/checkin")) {
+    await page.getByRole("button", { name: /Iniciar meu dia|Atualizar check-in/ }).click();
+  }
   await expect(page).toHaveURL(/\/pt\/athlete\/home/);
 }
 

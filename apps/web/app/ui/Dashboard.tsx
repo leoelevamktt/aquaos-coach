@@ -85,7 +85,10 @@ function CoachWorkspace() {
     setSigningOut(true);
     try { await apiRequest("/api/v1/auth/logout", { method: "POST" }); }
     catch { /* sessão já pode ter expirado */ }
-    finally { window.location.assign("/pt/coach/today"); }
+    finally {
+      sessionStorage.setItem("natacao_skip_demo_login", "1");
+      window.location.assign("/pt/coach/today");
+    }
   };
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {

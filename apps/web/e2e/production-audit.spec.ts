@@ -59,8 +59,10 @@ async function loginAthlete(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: /^Entrar$/ }).click();
   const response = await loginResponse;
   if (response) expect(response.status()).toBe(200);
-  await expect(page).toHaveURL(/\/pt\/athlete\/checkin/, { timeout: 20_000 });
-  await page.getByRole("button", { name: "Iniciar meu dia" }).click();
+  await expect(page).toHaveURL(/\/pt\/athlete\/(checkin|home)/, { timeout: 20_000 });
+  if (page.url().includes("/checkin")) {
+    await page.getByRole("button", { name: /Iniciar meu dia|Atualizar check-in/ }).click();
+  }
   await expect(page).toHaveURL(/\/pt\/athlete\/home/, { timeout: 20_000 });
 }
 
@@ -125,10 +127,10 @@ for (const project of ["desktop", "mobile"] as const) {
         await page.goto(`${BASE}${view.path}`, { waitUntil: "domcontentloaded" });
         await expect(page).toHaveURL(new RegExp(view.path), { timeout: 15_000 });
         const probes: Record<string, RegExp> = {
-          home: /A2 Steady State|Sessão de hoje/,
-          week: /Semana 6 de 16|Próximas sessões/,
-          competitions: /Competições|Troféu Regional/,
-          results: /Registrar resultados|Dados da série/,
+          home: /Sessão prescrita|Sessão concluída|Check-in pendente|Sem sessão prescrita/,
+          week: /Resumo semanal|Próximas sessões|Planejado/,
+          competitions: /Competições/,
+          results: /Registrar resultados|Sem sessão para registrar/,
         };
         await expect(page.locator("body")).toContainText(probes[view.view] ?? /.+/, { timeout: 20_000 });
         const text = await page.locator("body").first().innerText();

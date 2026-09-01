@@ -23,7 +23,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     void apiRequest<{ user: SessionUser }>("/api/v1/auth/me")
       .then((response) => { setUser(response.user); setState(response.user.role === "coach" || response.user.role === "admin" ? "ready" : "denied"); })
       .catch(() => {
-        if (process.env.NODE_ENV !== "production") {
+        if (process.env.NODE_ENV !== "production" && sessionStorage.getItem("natacao_skip_demo_login") !== "1") {
           void apiRequest<{ user: SessionUser }>("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "coach@natacao.local", password: "natacao-demo" }) })
             .then((response) => { setUser(response.user); setState(response.user.role === "coach" || response.user.role === "admin" ? "ready" : "denied"); })
             .catch(() => setState("signin"));
@@ -45,6 +45,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     setSubmitting(true); setError("");
     try {
       const response = await apiRequest<{ user: SessionUser }>("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: email.trim(), password }) });
+      sessionStorage.removeItem("natacao_skip_demo_login");
       setUser(response.user);
       if (response.user.role === "coach" || response.user.role === "admin") setState("ready");
       else setState("denied");

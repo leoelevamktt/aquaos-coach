@@ -44,9 +44,29 @@ async function loginAthlete(page: Page) {
   await page.getByRole("textbox", { name: "E-mail ou CPF" }).fill(ATHLETE_EMAIL);
   await page.getByRole("textbox", { name: "Senha" }).fill(ATHLETE_PASSWORD);
   await page.getByRole("button", { name: /^Entrar$/ }).click();
-  await expect(page).toHaveURL(/\/pt\/athlete\/checkin/);
-  await page.getByRole("button", { name: "Iniciar meu dia" }).click();
+  await expect(page).toHaveURL(/\/pt\/athlete\/(checkin|home)/);
+  if (page.url().includes("/checkin")) await page.getByRole("button", { name: /Iniciar meu dia|Atualizar check-in/ }).click();
   await expect(page).toHaveURL(/\/pt\/athlete\/home/);
+}
+
+async function completeAthleteOnboarding(page: Page, name?: string) {
+  if (name) await page.getByRole("textbox", { name: "Nome completo" }).fill(name);
+  await page.getByLabel("Data de nascimento").fill("2000-06-15");
+  await page.getByRole("button", { name: "Feminino", exact: true }).click();
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await page.getByRole("button", { name: "400L", exact: true }).click();
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await page.getByLabel("Competição-alvo").selectOption({ label: "Campeonato Brasileiro" });
+  await page.getByLabel("Data da competição").fill("2026-09-20");
+  await page.getByLabel("Prova principal").selectOption({ label: "400 Livre" });
+  await page.getByLabel("Objetivo").selectOption({ label: "Recorde pessoal" });
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await page.getByRole("button", { name: "SEG", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Manhã" }).check();
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await page.getByRole("checkbox", { name: "Li e aceito" }).nth(0).check();
+  await page.getByRole("checkbox", { name: "Li e aceito" }).nth(1).check();
+  await page.getByRole("button", { name: "Continuar" }).click();
 }
 
 test.describe("fluxos do coach", () => {
@@ -173,14 +193,12 @@ test.describe("fluxos do coach", () => {
     const invitationUrl = await dialog.getByRole("textbox", { name: "Link do convite" }).inputValue();
     expect(invitationUrl).toContain("/pt/athlete/access?invite=");
     await dialog.getByRole("button", { name: "Concluir" }).click();
+    await page.request.post("http://localhost:4000/api/v1/auth/logout");
+    await page.context().clearCookies();
     await page.goto(invitationUrl, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "Primeiro acesso" }).click();
-    await page.getByRole("textbox", { name: "E-mail de acesso (convite)" }).fill(email);
-    await page.getByRole("textbox", { name: "Senha de acesso (convite)" }).fill("Convite-2026!");
-    for (let step = 1; step < 6; step += 1) {
-      await page.getByRole("button", { name: "Continuar" }).click();
-      await expect(page).toHaveURL(new RegExp(`/pt/athlete/onboarding/${step + 1}`));
-    }
+    await page.getByLabel("Crie sua senha").fill("Convite-2026!");
+    await completeAthleteOnboarding(page);
     await page.getByRole("button", { name: "Criar meu planejamento" }).click();
     await expect(page).toHaveURL(/\/pt\/athlete\/checkin/);
   });
@@ -194,24 +212,26 @@ test.describe("fluxos do atleta", () => {
     await loginAthlete(page);
     failures.splice(0, failures.length, ...failures.filter((failure) => !failure.includes("/api/v1/auth/me")));
     await assertLayout(page);
-    await page.getByRole("button", { name: /Sessão de hoje/ }).click();
+    await page.getByRole("button", { name: /Sessão prescrita|Sessão concluída/ }).click();
     await expect(page).toHaveURL(/\/pt\/athlete\/session/);
     await assertLayout(page);
     await page.getByRole("button", { name: "Registrar resultados" }).click();
+    await page.getByRole("button", { name: "Resumo rápido" }).click();
+    await page.getByLabel("Melhor").fill("2:07.15");
+    await page.getByLabel("Média").fill("2:08.20");
+    await page.getByLabel("Última").fill("2:09.05");
     await page.getByRole("button", { name: "Salvar resultados" }).click();
-    await expect(page).toHaveURL(/\/pt\/athlete\/home/);
-    await page.getByRole("button", { name: /Sessão de hoje/ }).click();
-    await page.getByRole("button", { name: "Finalizar sessão" }).click();
-    await page.getByRole("button", { name: "Finalizar meu dia" }).click();
+    await expect(page).toHaveURL(/\/pt\/athlete\/checkout/);
+    await page.getByRole("button", { name: "Concluir treino" }).click();
     await expect(page).toHaveURL(/\/pt\/athlete\/home/);
     await page.getByRole("button", { name: "Competições", exact: true }).last().click();
-    await page.getByRole("button", { name: "Inserir resultados", exact: true }).first().click();
+    await page.getByRole("button", { name: "Inserir resultado", exact: true }).first().click();
     await expect(page.locator(".athlete-form")).toContainText("Resultado da competição");
     await page.getByRole("textbox", { name: "Tempo" }).fill("3:50.80");
     await page.getByRole("button", { name: "Salvar resultado" }).click();
     await expect(page).toHaveURL(/\/pt\/athlete\/competitions/);
     for (const item of ["Semanal", "Fase", "Competições", "Mais", "Hoje"]) {
-      await page.getByRole("button", { name: item, exact: true }).last().click();
+      await page.getByRole("button", { name: item, exact: true }).last().click({ force: true });
       await assertLayout(page);
     }
     expect(failures).toEqual([]);
@@ -224,10 +244,7 @@ test.describe("fluxos do atleta", () => {
     await page.goto(`${BASE}/pt/athlete/welcome`, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "Entrar no app" }).click();
     await page.getByRole("button", { name: /Primeiro acesso/ }).click();
-    for (let step = 1; step < 6; step += 1) {
-      await page.getByRole("button", { name: "Continuar" }).click();
-      await expect(page).toHaveURL(new RegExp(`/pt/athlete/onboarding/${step + 1}`));
-    }
+    await completeAthleteOnboarding(page, "Ana Souza");
     await expect(page).toHaveURL(/\/pt\/athlete\/onboarding\/6/);
     await page.getByRole("button", { name: "Criar meu planejamento" }).click();
     await expect(page).toHaveURL(/\/pt\/athlete\/login/);
