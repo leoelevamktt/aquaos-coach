@@ -147,7 +147,7 @@ function CoachWorkspace() {
     <nav className="mobile-nav">
       {nav.slice(0, 5).map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => go(item.id)}><item.icon size={19} /><span>{item.label}</span></button>)}
     </nav>
-    {modal === "workout" && <WorkoutComposer seed={workoutSeed} onClose={() => { setModal(null); setWorkoutSeed(undefined); }} onSave={() => { setModal(null); setWorkoutSeed(undefined); setWorkoutRefresh((value) => value + 1); router.push(routes.practices); notify("Treino publicado, salvo no calendário e enviado para sincronização."); }} />}
+    {modal === "workout" && <WorkoutComposer seed={workoutSeed} onClose={() => { setModal(null); setWorkoutSeed(undefined); }} onSave={() => { const edited = Boolean(workoutSeed?.persistedId); setModal(null); setWorkoutSeed(undefined); setWorkoutRefresh((value) => value + 1); router.push(routes.practices); notify(edited ? "Evento atualizado na agenda sem criar duplicata." : "Treino publicado e salvo no calendário."); }} />}
     {modal === "invite" && <InviteModal onClose={() => setModal(null)} onSave={() => { setModal(null); notify("Convite criado e copiado com segurança."); }} />}
     {modal === "video" && <VideoReview videoId={videoId} onClose={() => setModal(null)} onSave={() => { setModal(null); notify("Revisão técnica salva no prontuário."); }} />}
     {modal === "meet" && <MeetDetail meetId={meetId} onClose={() => setModal(null)} onNotify={notify} />}

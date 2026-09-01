@@ -21,6 +21,8 @@ Thumbs.db
 # Temporários
 .tmp-*/
 .claude/
+.dev-server.log
+.dev-server-error.log
 
 apps/web/test-results/
 apps/web/playwright-report/

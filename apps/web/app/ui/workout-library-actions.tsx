@@ -7,11 +7,15 @@ import { apiRequest } from "./api";
 
 export type WorkoutSeed = {
   id?: string;
+  persistedId?: string;
   title: string;
   prompt: string;
   distanceMeters: number;
   zone: string;
   kind: "swim" | "strength";
+  scheduledAt?: string;
+  target?: string;
+  source?: string;
 };
 
 export function WorkoutTemplateEditor({ initial, onClose, onUse, onNotify, onSaved }: {

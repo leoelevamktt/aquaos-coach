@@ -27,7 +27,7 @@ type Bootstrap = {
   prescriptions: { pendingApproval: number; published: number };
   seed: { expectedSessions: number; expectedBlocks: number; packageLocated: boolean; staged: boolean; imported: boolean; status: string; packageHash: string | null; reason: string };
   featureFlags: Record<string, boolean>;
-  gates: { id: string; label: string; status: string; evidence?: string; detail?: string }[];
+  gates: { id: string; label: string; status: string; evidence?: string | string[]; detail?: string; expected?: unknown; observed?: unknown; remediation?: string; blocking?: boolean }[];
   provenance: { label: string };
 };
 
@@ -118,6 +118,10 @@ const pendingDecisions: Array<{ id: string; title: string; status: CoverageStatu
 const formatNumber = (value: number | null | undefined, suffix = "") => value === null || value === undefined
   ? "Dados insuficientes"
   : `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(value)}${suffix}`;
+
+const gateEvidence = (gate: Bootstrap["gates"][number]) => Array.isArray(gate.evidence)
+  ? gate.evidence.join(" · ")
+  : gate.evidence ?? gate.detail ?? "Status informado pelo endpoint de bootstrap RKF.";
 
 function Status({ value }: { value: string }) {
   const tone = value === "PASS" || value === "PUBLISHED" || value === "CONFIRMED" || value === "PRONTO" || value === "IMPORTED" ? "ok" : value === "BLOCKED" || value === "AGUARDAR_TREINADOR" ? "blocked" : "review";
@@ -327,9 +331,10 @@ function MaterialsCoverage({ data, coverage, decisionRegister, setTab }: { data:
   const gateCounts = data.gates.reduce((counts, gate) => {
     if (gate.status === "PASS") counts.pass += 1;
     else if (gate.status === "BLOCKED") counts.blocked += 1;
+    else if (gate.status === "EXCLUDED") counts.excluded += 1;
     else counts.review += 1;
     return counts;
-  }, { pass: 0, review: 0, blocked: 0 });
+  }, { pass: 0, review: 0, blocked: 0, excluded: 0 });
   const decisionsForCoverage = decisionRegister?.decisions.filter((item) => item.status !== "PASS") ?? pendingDecisions;
   const releaseStatus: CoverageStatus = gateCounts.blocked > 0 || decisionsForCoverage.some((item) => item.status === "BLOCKED") ? "BLOCKED" : gateCounts.review > 0 || decisionsForCoverage.length > 0 ? "REVIEW" : "PASS";
   const liveFiles = coverage?.files.map((file) => ({
@@ -355,7 +360,7 @@ function MaterialsCoverage({ data, coverage, decisionRegister, setTab }: { data:
       <div className="rkf-coverage-metrics" aria-label="Resumo da cobertura">
         <article><small>REGISTROS PRESERVADOS</small><strong>{new Intl.NumberFormat("pt-BR").format(totalRows)}</strong><span>10 arquivos tabulares</span></article>
         <article><small>ARQUIVOS OPERACIONAIS</small><strong>{operationalFiles}<em>/10</em></strong><span>{reviewFiles} arquivo em revisão</span></article>
-        <article><small>GATES DA API</small><strong>{gateCounts.pass}<em> PASS</em></strong><span>{gateCounts.review} em revisão, {gateCounts.blocked} bloqueados</span></article>
+        <article><small>GATES DA API</small><strong>{gateCounts.pass}<em> PASS</em></strong><span>{gateCounts.review} em revisão, {gateCounts.blocked} bloqueado, {gateCounts.excluded} excluído do escopo</span></article>
         <article><small>STATUS DA SEED</small><Status value={seedStatus} /><span>{data.seed.imported ? "Importada com transação registrada" : data.seed.reason}</span></article>
       </div>
       <div className="rkf-coverage-notice"><AlertTriangle aria-hidden="true" size={18} /><p><strong>Leitura correta do status</strong> Integridade dos arquivos não significa homologação integral da metodologia. O produto permanece bloqueado enquanto decisões críticas não tiverem evidência aprovada.</p></div>
@@ -377,7 +382,7 @@ function MaterialsCoverage({ data, coverage, decisionRegister, setTab }: { data:
       <div className="rkf-panel-heading"><SectionHead title="Evidências recebidas da API" subtitle="Estados reportados pelo núcleo no carregamento atual" /><button type="button" className="secondary-button compact" onClick={() => setTab("governance")}>Abrir governança <ChevronRight size={15} /></button></div>
       <div className="rkf-evidence-grid">
         {data.gates.map((gate) => <article key={gate.id}>
-          <span>{gate.id}</span><div><strong>{gate.label}</strong><p>{gate.evidence ?? gate.detail ?? "Status informado pelo endpoint de bootstrap RKF."}</p></div><Status value={gate.status} />
+          <span>{gate.id}</span><div><strong>{gate.label}</strong><p>{gateEvidence(gate)}</p></div><Status value={gate.status} />
         </article>)}
       </div>
       <div className="rkf-api-source"><ShieldCheck aria-hidden="true" size={17} /><span><strong>Proveniência da leitura</strong>{data.provenance.label}</span></div>
@@ -405,6 +410,32 @@ function MaterialsCoverage({ data, coverage, decisionRegister, setTab }: { data:
 }
 
 function Governance({ data, decisionRegister, busy, setBusy, refresh, onNotify }: { data: Bootstrap; decisionRegister?: DecisionRegister; busy: string; setBusy: (value: string) => void; refresh: () => Promise<void>; onNotify: (message: string) => void }) {
+  const [editing, setEditing] = useState<GovernanceDecision>();
+  const [decisionStatus, setDecisionStatus] = useState<GovernanceDecision["status"]>("REVIEW");
+  const [decisionText, setDecisionText] = useState("");
+  const [decisionEvidence, setDecisionEvidence] = useState("");
+  const openDecision = (item: GovernanceDecision) => {
+    setEditing(item);
+    setDecisionStatus(item.status);
+    setDecisionText(item.decision ?? "");
+    setDecisionEvidence(item.evidence.join("\n"));
+  };
+  const saveDecision = async () => {
+    if (!editing || !decisionRegister) return;
+    const evidence = decisionEvidence.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+    if (decisionText.trim().length < 3 || !evidence.length) { onNotify("Informe uma decisão e pelo menos uma evidência verificável."); return; }
+    setBusy(`decision-${editing.id}`);
+    try {
+      await apiRequest(`/api/v1/rkf/governance/decisions/${editing.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: decisionRegister.revision, status: decisionStatus, decision: decisionText.trim(), evidence }),
+      });
+      setEditing(undefined); await refresh(); onNotify(`${editing.id} atualizada com nova revisão e trilha de auditoria.`);
+    } catch (requestError) {
+      await refresh();
+      onNotify(requestError instanceof Error ? requestError.message : "Não foi possível atualizar a decisão.");
+    } finally { setBusy(""); }
+  };
   const stageSeed = async () => {
     setBusy("seed");
     try { await apiRequest("/api/v1/rkf/seed/stage", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); await refresh(); onNotify("Pacote RKF V5.1 conferido: 910 sessões e 6.226 blocos no staging imutável."); } catch (requestError) { onNotify(requestError instanceof Error ? requestError.message : "Falha ao conferir o staging"); } finally { setBusy(""); }
@@ -424,6 +455,7 @@ function Governance({ data, decisionRegister, busy, setBusy, refresh, onNotify }
       <article className="card rkf-seed-card"><Database size={22} /><small>SEED CANÔNICO</small><strong>{data.seed.expectedSessions} sessões</strong><p>{new Intl.NumberFormat("pt-BR").format(data.seed.expectedBlocks)} blocos esperados</p><Status value={data.seed.status} />{data.seed.packageHash && <p className="rkf-seed-hash">SHA-256 {data.seed.packageHash.slice(0, 18)}…</p>}<div>{data.seed.staged ? <CircleCheck size={16} /> : <AlertTriangle size={16} />}{data.seed.reason}</div><button className="secondary-button" disabled={Boolean(busy)} onClick={() => void stageSeed()}>{busy === "seed" ? <LoaderCircle className="spin" size={16} /> : <ShieldCheck size={16} />}Conferir staging</button>{data.seed.staged && !data.seed.imported && <button className="primary-button" disabled={Boolean(busy)} onClick={() => void importSeed()}>{busy === "seed-import" ? <LoaderCircle className="spin" size={16} /> : <Database size={16} />}Importar seed</button>}</article>
       <article className="card rkf-entitlement-card"><Layers3 size={21} /><small>ENTITLEMENTS ATIVOS</small>{["LOAD ATHLETE", "LOAD TEAM", "FULL ATHLETE", "FULL TEAM"].map((item) => <span key={item}><Check size={14} />{item}</span>)}</article>
     </aside>
-      <section className="card rkf-decisions"><SectionHead title="Registro de decisões" subtitle={decisionRegister ? `${decisionRegister.summary.total} decisões formais, revisão ${decisionRegister.revision}` : "Conflitos metodológicos permanecem explícitos até homologação"} />{decisionRegister ? decisionRegister.decisions.map((item) => <article key={item.id}><span>{item.id}</span><div><strong>{item.title}</strong><p>{item.decision ?? item.evidence[0] ?? "Decisão formal pendente."}</p><small>Responsável: {item.owner}{item.evidence.length ? ` | ${item.evidence.length} evidência(s)` : ""}</small></div><Status value={item.status} /></article>) : <><article><span>DEC 01</span><div><strong>Mapeamento de zonas em REDUZIR FORTE</strong><p>Seção 18 é a convenção primária. Workbook 32.6 permanece disponível como variante versionada.</p></div><Status value="REVIEW" /></article><article><span>DEC 02</span><div><strong>Seed RKF V5.1</strong><p>{data.seed.imported ? "Pacote canônico importado com hash, contagens e proveniência preservados." : "Staging conferido. A importação transacional está pronta para execução controlada."}</p></div><Status value={data.seed.imported ? "PASS" : "REVIEW"} /></article></>}</section>
+      <section className="card rkf-decisions"><SectionHead title="Registro de decisões" subtitle={decisionRegister ? `${decisionRegister.summary.total} decisões formais, revisão ${decisionRegister.revision}` : "Conflitos metodológicos permanecem explícitos até homologação"} />{decisionRegister ? decisionRegister.decisions.map((item) => <article key={item.id}><span>{item.id}</span><div><strong>{item.title}</strong><p>{item.decision ?? item.evidence[0] ?? "Decisão formal pendente."}</p><small>Responsável: {item.owner}{item.evidence.length ? ` | ${item.evidence.length} evidência(s)` : ""}</small></div><Status value={item.status} /><button type="button" className="rkf-decision-edit" aria-label={`Editar ${item.id}: ${item.title}`} onClick={() => openDecision(item)}><PencilLine size={16} />Editar</button></article>) : <><article><span>DEC 01</span><div><strong>Mapeamento de zonas em REDUZIR FORTE</strong><p>Seção 18 é a convenção primária. Workbook 32.6 permanece disponível como variante versionada.</p></div><Status value="REVIEW" /></article><article><span>DEC 02</span><div><strong>Seed RKF V5.1</strong><p>{data.seed.imported ? "Pacote canônico importado com hash, contagens e proveniência preservados." : "Staging conferido. A importação transacional está pronta para execução controlada."}</p></div><Status value={data.seed.imported ? "PASS" : "REVIEW"} /></article></>}</section>
+      {editing && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setEditing(undefined); }}><section className="modal rkf-decision-modal" role="dialog" aria-modal="true" aria-labelledby="rkf-decision-title"><header><div><small>DECISÃO METODOLÓGICA · {editing.id}</small><h2 id="rkf-decision-title">{editing.title}</h2><p>Revisão atual {decisionRegister?.revision}. Uma atualização cria nova versão auditável.</p></div><button type="button" aria-label="Fechar edição" onClick={() => setEditing(undefined)}><X size={20} /></button></header><div className="rkf-decision-form"><label><span>Status</span><select value={decisionStatus} onChange={(event) => setDecisionStatus(event.target.value as GovernanceDecision["status"])}><option value="PASS">Homologada</option><option value="REVIEW">Em revisão</option><option value="BLOCKED">Bloqueada</option><option value="DEFERRED">Adiada</option></select></label><label><span>Decisão formal</span><textarea rows={5} value={decisionText} onChange={(event) => setDecisionText(event.target.value)} placeholder="Registre a convenção aprovada, o limite ou a ação necessária." /></label><label><span>Evidências — uma por linha</span><textarea rows={6} value={decisionEvidence} onChange={(event) => setDecisionEvidence(event.target.value)} placeholder="Teste executado, ata, documento, hash ou caso histórico aprovado." /></label><div className="rkf-decision-context"><ShieldCheck size={17} /><p><strong>Responsável atual: {editing.owner}</strong> A plataforma não converte uma decisão em PASS sem texto e evidência explícita.</p></div></div><footer><button type="button" className="secondary-button" onClick={() => setEditing(undefined)}>Cancelar</button><button type="button" className="primary-button" disabled={busy === `decision-${editing.id}`} onClick={() => void saveDecision()}>{busy === `decision-${editing.id}` ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}Salvar nova revisão</button></footer></section></div>}
   </div>;
 }

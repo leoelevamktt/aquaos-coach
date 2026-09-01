@@ -35,13 +35,16 @@
   --violet: #6354c9;
   --blue: #2f6fb5;
 
-  /* Type roles */
-  --type-micro: 13px;
-  --type-caption: 14px;
-  --type-control: 15px;
-  --type-body: 16px;
-  --type-section: 21px;
-  --type-page: clamp(34px, 3.2vw, 44px);
+  /* Type roles: one deliberate scale for the entire product. */
+  --type-micro: 12px;
+  --type-caption: 13px;
+  --type-control: 14px;
+  --type-body: 15px;
+  --type-subtitle: 17px;
+  --type-section: 22px;
+  --type-page: clamp(32px, 2.8vw, 40px);
+  --leading-tight: 1.18;
+  --leading-body: 1.52;
   --mono: var(--font-mono), ui-monospace, "SFMono-Regular", monospace;
 
   --shadow: 0 1px 2px rgba(11, 35, 42, .026), 0 8px 24px rgba(19, 49, 56, .038);
@@ -217,6 +220,63 @@ h1, h2, h3, strong, b { font-family: var(--font-display), var(--font-ui), sans-s
 .load-summary b { font-size: 15px; margin-top: 2px; }
 .demo-caption { display: flex; align-items: center; gap: 5px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--soft-line); color: #849398; font-size: 8px; }
 
+/* Central adaptativa: estado operacional, decisão humana e rastreabilidade. */
+.automation-card { overflow: hidden; }
+.automation-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 13px 0 4px; }
+.automation-summary span { display: flex; align-items: baseline; gap: 5px; min-width: 0; padding: 8px 9px; border: 1px solid var(--soft-line); border-radius: 7px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.automation-summary b { color: var(--ink); font-size: 15px; }
+.automation-summary .critical { border-color: #efd1ce; background: #fff8f7; }
+.automation-summary .high { border-color: #ecdcb9; background: #fffbf2; }
+.automation-summary .opportunity { border-color: #cde4dc; background: #f6fbf9; }
+.automation-list { display: grid; margin-top: 8px; }
+.automation-item { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 14px 0 14px 12px; border-bottom: 1px solid var(--soft-line); }
+.automation-item::before { content: ""; position: absolute; inset: 14px auto 14px 0; width: 3px; border-radius: 3px; background: #91aaa6; }
+.automation-item.critical::before { background: #c94f51; }
+.automation-item.high::before { background: #c88329; }
+.automation-item.opportunity::before { background: #087d69; }
+.automation-copy { min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.automation-copy > b { display: block; margin-top: 5px; font-size: 13px; line-height: 1.3; letter-spacing: -.08px; }
+.automation-copy p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.automation-priority { color: #718086; font-size: 8px; font-weight: 850; letter-spacing: 1.15px; }
+.automation-item.critical .automation-priority { color: #ac3f42; }
+.automation-item.high .automation-priority { color: #a46720; }
+.automation-item.opportunity .automation-priority { color: #08715f; }
+.automation-triggers { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.automation-triggers em { padding: 3px 6px; border-radius: 4px; background: #edf2f1; color: #51666b; font-size: 9px; font-style: normal; font-weight: 700; }
+.automation-actions { display: flex; flex-direction: column; justify-content: center; gap: 6px; width: 88px; }
+.automation-actions button { min-height: 30px; padding: 6px 8px; border: 1px solid #cad7d5; border-radius: 6px; background: #fff; color: #486064; font-size: 9px; font-weight: 800; cursor: pointer; }
+.automation-actions button:first-child { border-color: var(--teal); background: var(--teal); color: #fff; }
+.automation-actions button:hover { border-color: var(--teal-dark); }
+.automation-actions button:disabled { opacity: .5; cursor: wait; }
+.automation-empty { display: flex; align-items: center; gap: 10px; padding: 20px 4px; color: var(--teal); }
+.automation-empty div { display: flex; flex-direction: column; }
+.automation-empty b { color: var(--ink); font-size: 12px; }
+.automation-empty small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.automation-footnote { display: flex; align-items: flex-start; gap: 6px; margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--soft-line); color: #77898d; font-size: 9px; line-height: 1.45; }
+.automation-footnote svg { flex: 0 0 auto; margin-top: 1px; }
+.dynamic-bars { position: relative; gap: 5px; padding-inline: 2px; }
+.dynamic-bars .load-week { position: relative; display: flex; flex: 1; align-items: flex-end; justify-content: center; height: 100%; max-width: none; margin: 0; background: transparent; border-radius: 0; }
+.dynamic-bars .load-week i { position: absolute; bottom: 18px; width: 42%; border-radius: 3px 3px 0 0; transition: height .28s ease-out; }
+.dynamic-bars .load-plan { left: 7%; background: #d5dfde; }
+.dynamic-bars .load-done { right: 7%; background: var(--teal); }
+.dynamic-bars .load-week small { position: absolute; bottom: 1px; color: #7d8d91; font-size: 8px; font-weight: 700; }
+.load-card .load-summary b { font-size: 12px; }
+
+@media (max-width: 640px) {
+  .composer-metadata { grid-template-columns: 1fr; }
+  .automation-summary { grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
+  .automation-summary span { flex-direction: column; gap: 0; padding: 7px; font-size: 9px; }
+  .automation-item { grid-template-columns: 1fr; padding-block: 14px; }
+  .automation-actions { width: 100%; flex-direction: row; justify-content: flex-start; }
+  .automation-actions button { min-height: 38px; padding-inline: 12px; font-size: 11px; }
+  .automation-copy > b { font-size: 14px; }
+  .automation-copy p { font-size: 12px; }
+  .automation-triggers em { font-size: 10px; }
+  .load-summary { gap: 4px; }
+  .load-summary > div { padding-left: 5px; }
+  .load-card .load-summary b { font-size: 11px; overflow-wrap: anywhere; }
+}
+
 /* Team and athlete */
 .team-metrics { grid-template-columns: repeat(4, 1fr); margin-bottom: 16px; }
 .roster-card { padding: 0; overflow: hidden; }
@@ -368,6 +428,12 @@ h1, h2, h3, strong, b { font-family: var(--font-display), var(--font-ui), sans-s
 .modal-footer { position: sticky; bottom: 0; z-index: 4; display: flex; justify-content: flex-end; gap: 7px; padding: 13px 20px; border-top: 1px solid var(--line); background: #fff; }
 .composer-steps { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; border-bottom: 1px solid var(--soft-line); }.composer-steps > span { display: flex; align-items: center; gap: 5px; color: #8a989c; font-size: 8px; font-weight: 700; }.composer-steps > span i { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: #e7eded; font-style: normal; }.composer-steps > span.active { color: var(--teal); }.composer-steps > span.active i { background: var(--teal); color: #fff; }.composer-steps > em { width: 50px; height: 1px; background: #d9e2e3; }
 .composer-body { padding: 19px; }.composer-input { border: 1px solid #cbdcda; border-radius: 11px; padding: 13px; box-shadow: 0 0 0 3px #f0f8f6; }.composer-input textarea { width: 100%; height: 145px; resize: vertical; border: 0; outline: 0; padding: 10px 0; color: var(--ink); font-size: 12px; line-height: 1.55; }.composer-input > div { display: flex; gap: 5px; flex-wrap: wrap; }.composer-input button { display: flex; align-items: center; gap: 4px; min-height: 29px; border: 1px solid var(--line); border-radius: 7px; background: #fff; padding: 0 8px; color: #677a80; font-size: 8px; cursor: pointer; }.composer-input button.assistant-chip { margin-left: auto; color: #6752bd; background: #f2efff; border-color: #e0dafa; }.assistant-suggestions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 12px; }.assistant-suggestions > span { color: var(--muted); font-size: 7px; letter-spacing: 1px; font-weight: 800; }.assistant-suggestions button { border: 0; border-radius: 6px; background: #f1f5f5; color: #63767c; padding: 6px 8px; font-size: 8px; cursor: pointer; }
+.schedule-context { display: flex; align-items: center; gap: 9px; margin-bottom: 13px; padding: 10px 12px; border: 1px solid #cfe0dd; border-radius: 8px; background: #f6faf9; color: var(--teal-dark); }
+.schedule-context > span { display: flex; flex-direction: column; }
+.schedule-context b { font-size: 11px; }
+.schedule-context small { margin-top: 2px; color: #64777b; font-size: 10px; }
+.composer-metadata { grid-template-columns: 1fr 1fr 1fr; margin: 11px 0 14px; }
+.composer-metadata input:disabled, .composer-metadata select:disabled { background: #f2f5f5; color: #829095; cursor: not-allowed; }
 .structured-preview { padding: 17px 20px; }.workout-summary { display: flex; align-items: center; justify-content: space-between; padding: 11px; margin-bottom: 9px; background: #f3f9f7; border-radius: 9px; }.workout-summary > div { display: flex; align-items: center; gap: 9px; }.workout-summary > div > div { display: flex; flex-direction: column; }.workout-summary b { font-size: 10px; }.workout-summary small { color: var(--muted); font-size: 8px; margin-top: 2px; }.workout-block { display: grid; grid-template-columns: 28px 1fr 34px; gap: 9px; padding: 11px 2px; border-bottom: 1px solid var(--soft-line); }.workout-block > span { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 6px; background: #edf4f3; color: var(--teal); font-size: 8px; font-weight: 800; }.workout-block b { font-size: 10px; }.workout-block p { margin-top: 4px; color: #60747a; font-size: 9px; }
 .assignment-panel { padding: 20px; }.target-options { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin: 8px 0 17px; }.target-options input { display: none; }.target-options label > span { min-height: 77px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 9px; cursor: pointer; }.target-options input:checked + span { border-color: var(--teal); background: #f1faf8; color: var(--teal); box-shadow: inset 0 0 0 1px var(--teal); }.target-options b { margin: 5px 0 2px; font-size: 9px; }.target-options small { color: var(--muted); font-size: 7px; }.override-callout, .secure-note { display: flex; align-items: center; gap: 9px; padding: 11px; margin-top: 15px; border-radius: 8px; background: #f2efff; color: #6752bd; }.override-callout b { color: #434253; font-size: 9px; }.override-callout p, .secure-note p { color: #77748b; font-size: 8px; line-height: 1.4; margin-top: 2px; }
 .modal-form { display: grid; gap: 13px; padding: 20px; }.secure-note { margin-top: 0; background: #edf7f4; color: var(--teal); }.secure-note p { color: #637a76; }
@@ -1662,10 +1728,27 @@ select:focus-visible, a:focus-visible, [tabindex]:focus-visible {
 .rkf-entitlement-card span { display: flex; align-items: center; gap: 7px; color: #40536b; font-size: 11px; font-weight: 700; }
 .rkf-entitlement-card span svg { color: #178052; }
 .rkf-decisions { grid-column: 1 / -1; }
-.rkf-decisions article { display: grid; grid-template-columns: 58px 1fr auto; gap: 12px; align-items: start; padding: 14px 0; border-top: 1px solid var(--soft-line); }
+.rkf-decisions article { display: grid; grid-template-columns: 58px minmax(0,1fr) auto auto; gap: 12px; align-items: start; padding: 14px 0; border-top: 1px solid var(--soft-line); }
 .rkf-decisions article > span { color: #174a8c; font-family: var(--mono); font-size: 10px; font-weight: 800; }
 .rkf-decisions strong { font-size: 12px; }
 .rkf-decisions p { margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.rkf-decisions small { display: block; margin-top: 7px; color: #738399; font-size: 10px; }
+.rkf-decision-edit { min-height: 34px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid #cbd7e5; border-radius: 7px; background: #fff; color: #174a8c; font-size: 11px; font-weight: 750; cursor: pointer; }
+.rkf-decision-edit:hover { border-color: #174a8c; background: #f3f7fc; }
+.rkf-decision-modal { max-width: 720px; }
+.rkf-decision-modal > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 24px 26px 19px; border-bottom: 1px solid var(--soft-line); }
+.rkf-decision-modal > header small { color: #174a8c; font-size: 10px; font-weight: 850; letter-spacing: .08em; }
+.rkf-decision-modal > header h2 { margin-top: 6px; color: #10203d; font-size: 21px; }
+.rkf-decision-modal > header p { margin-top: 6px; color: var(--muted); font-size: 12px; }
+.rkf-decision-modal > header button { width: 38px; height: 38px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: #53647a; cursor: pointer; }
+.rkf-decision-form { display: grid; gap: 15px; padding: 22px 26px; }
+.rkf-decision-form label { display: grid; gap: 7px; color: #53647a; font-size: 11px; font-weight: 800; }
+.rkf-decision-form select, .rkf-decision-form textarea { width: 100%; min-height: 43px; padding: 11px 12px; border: 1px solid #cbd7e5; border-radius: 8px; background: #fff; color: #14243f; font: inherit; font-size: 13px; line-height: 1.5; }
+.rkf-decision-form textarea { resize: vertical; }
+.rkf-decision-context { display: grid; grid-template-columns: 20px minmax(0,1fr); gap: 9px; padding: 13px; border-left: 3px solid #174a8c; background: #edf5ff; color: #174a8c; }
+.rkf-decision-context p { color: #53647a; font-size: 11px; line-height: 1.5; }
+.rkf-decision-context strong { display: block; color: #174a8c; }
+.rkf-decision-modal > footer { display: flex; justify-content: flex-end; gap: 9px; padding: 17px 26px 23px; border-top: 1px solid var(--soft-line); }
 
 /* RKF material coverage: integrity, activation and homologation stay distinct. */
 .rkf-coverage { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(320px, .82fr); gap: 16px; align-items: start; }
@@ -1783,7 +1866,7 @@ select:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   .rkf-block-list article { grid-template-columns: 25px 1fr auto; }
   .rkf-block-list em { grid-column: 2; width: max-content; }
   .rkf-prescription-history article { grid-template-columns: 36px 1fr; }
-  .rkf-prescription-history article .rkf-status, .rkf-prescription-history article button, .rkf-prescription-history article .rkf-lock { grid-column: 2; }
+.rkf-prescription-history article .rkf-status, .rkf-prescription-history article button, .rkf-prescription-history article .rkf-lock { grid-column: 2; }
   .rkf-channel-picker { grid-template-columns: repeat(3,1fr); }
   .rkf-form-actions { flex-direction: column; }
   .rkf-form-actions button { width: 100%; }
@@ -1878,4 +1961,304 @@ select:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   .calendar-toolbar .week-load { justify-content: center; }
   .settings-callout { grid-template-columns: 32px minmax(0, 1fr); align-items: start; }
   .settings-callout button { grid-column: 2; justify-self: start; }
+}
+
+/* ============================================================
+   TYPOGRAPHY AND COMPOSITION CONTRACT
+   The product accumulated several page-specific type scales over time.
+   This final layer gives every recurring role one size and one rhythm.
+   ============================================================ */
+body {
+  font-size: var(--type-body);
+  line-height: var(--leading-body);
+  letter-spacing: -.008em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.content {
+  width: min(1480px, 100%);
+  padding: 36px 40px 76px;
+}
+
+.page-title {
+  align-items: flex-end;
+  margin-bottom: 28px;
+}
+.page-title h1 {
+  max-width: 900px;
+  margin-top: 6px;
+  color: #10262e;
+  font-size: var(--type-page);
+  font-weight: 680;
+  line-height: 1.04;
+  letter-spacing: -.045em;
+}
+.page-title p {
+  max-width: 760px;
+  margin-top: 10px;
+  color: #60737a;
+  font-size: var(--type-body);
+  line-height: 1.55;
+}
+.eyebrow,
+.nav-kicker {
+  font-size: var(--type-micro);
+  font-weight: 750;
+  line-height: 1.2;
+  letter-spacing: .105em;
+}
+
+.section-head { margin-bottom: 18px; }
+.section-head h2 {
+  color: #142a32;
+  font-size: var(--type-section);
+  font-weight: 650;
+  line-height: var(--leading-tight);
+  letter-spacing: -.026em;
+}
+.section-head p {
+  margin-top: 5px;
+  color: #6a7b81;
+  font-size: var(--type-caption);
+  line-height: 1.48;
+}
+
+.card {
+  border-color: #dce5e3;
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(11,35,42,.025), 0 10px 30px rgba(19,49,56,.035);
+}
+.today-layout,
+.athlete-dashboard,
+.season-columns,
+.analytics-grid,
+.inbox-layout { gap: 18px; }
+.today-layout .card,
+.athlete-dashboard .card,
+.season-columns .card,
+.analytics-grid .card,
+.inbox-layout .card { padding: 22px; }
+
+.main-nav button { min-height: 44px; padding: 10px 12px; }
+.main-nav button span { font-size: var(--type-control); line-height: 1.25; }
+.brand small,
+.team-switch small,
+.coach-card small,
+.demo-notice small { font-size: var(--type-micro); }
+.team-switch strong,
+.coach-card strong,
+.demo-notice strong { font-size: var(--type-control); }
+
+.content button,
+.content input,
+.content select,
+.content textarea { font-size: var(--type-control); }
+.primary-button,
+.secondary-button {
+  min-height: 42px;
+  padding-inline: 16px;
+  border-radius: 9px;
+  font-size: var(--type-control);
+}
+.text-button { min-height: 40px; font-size: var(--type-control); }
+.content small,
+.content em,
+.content kbd { font-size: var(--type-micro); line-height: 1.42; }
+
+.metric-card { min-height: 118px; padding: 18px; }
+.metric-card strong { font-size: 24px; line-height: 1.1; }
+.metric-card small { font-size: var(--type-caption); line-height: 1.42; }
+.next-meet-card p,
+.meet-countdown > div { font-size: var(--type-micro); line-height: 1.5; }
+.create-options strong,
+.session-strip strong,
+.water-list b,
+.insight-row b,
+.athlete-row b { font-size: var(--type-control); }
+.create-options small,
+.session-strip small,
+.water-list small,
+.water-list em,
+.insight-row small,
+.athlete-row small { font-size: var(--type-micro); line-height: 1.42; }
+
+/* Operational labels and chips: compact, but never microscopic. */
+.priority,
+.zone-tag,
+.athlete-person > i,
+.automation-priority,
+.automation-triggers em,
+.automation-actions button,
+.automation-empty small,
+.automation-footnote,
+.dynamic-bars .load-week small,
+.load-summary small,
+.demo-caption,
+.review-badge,
+.done-badge,
+.real-video-chip,
+.rkf-status,
+.active-access,
+.qualified,
+.progress-ring.large span,
+.readiness-chart small,
+.radar-placeholder > span,
+.meet-readiness-score span,
+.meet-readiness-score em { font-size: var(--type-micro); line-height: 1.35; }
+
+.automation-summary span { min-height: 48px; padding: 9px 10px; font-size: var(--type-caption); }
+.automation-summary b { font-size: var(--type-subtitle); }
+.automation-copy > b { font-size: var(--type-control); line-height: 1.35; }
+.automation-copy p { font-size: var(--type-caption); line-height: 1.5; }
+.automation-actions { width: 106px; }
+.automation-actions button { min-height: 36px; padding: 7px 10px; }
+.automation-footnote { padding-top: 12px; }
+
+.progress-ring b { font-size: var(--type-caption); }
+.progress-ring.small b { font-size: 11px; }
+.progress-ring.large b { font-size: 30px; }
+.progress-ring.large span { margin-top: 0; letter-spacing: .08em; }
+
+.roster-head {
+  min-height: 44px;
+  padding-block: 12px;
+  font-size: var(--type-micro);
+  line-height: 1.25;
+}
+.athlete-row { min-height: 70px; }
+.filter-pills button,
+.tab-bar button,
+.inbox-tabs button { min-height: 40px; font-size: var(--type-caption); }
+.calendar-toolbar { min-height: 66px; }
+.calendar-toolbar > strong { font-size: var(--type-control); }
+.week-load { font-size: var(--type-caption); }
+.meet-priority { font-size: var(--type-micro); }
+.meet-list b,
+.meet-list strong { font-size: var(--type-control); }
+.meet-list small { font-size: var(--type-micro); line-height: 1.4; }
+
+.video-meta b { font-size: var(--type-control); }
+.video-meta small,
+.video-meta > div:last-child span,
+.video-meta > div:last-child button { font-size: var(--type-micro); }
+.video-meta h3 { font-size: var(--type-subtitle); line-height: 1.3; }
+.review-sidebar b { font-size: var(--type-control); }
+.review-sidebar small,
+.review-sidebar p { font-size: var(--type-micro); line-height: 1.45; }
+.video-upload-context label > span,
+.processing-badge { font-size: var(--type-micro); }
+.video-upload-context select,
+.video-upload-context input { font-size: var(--type-control); }
+
+/* Analysis charts keep annotations readable without competing with data. */
+.chart-y-labels,
+.stacked-chart small,
+.axis-label,
+.quad-label { font-size: var(--type-micro); line-height: 1.2; }
+.quadrant button { font-size: 11px; }
+.goal-athletes b,
+.goal-athletes button > strong { font-size: var(--type-control); }
+.goal-athletes small { font-size: var(--type-micro); }
+.performance-head { min-height: 40px; font-size: var(--type-micro); }
+.roster-performance > button { min-height: 58px; }
+.roster-performance b,
+.roster-performance strong { font-size: var(--type-control); }
+.roster-performance small { font-size: var(--type-micro); }
+.skill-pills i { width: 22px; height: 22px; font-size: 11px; }
+
+/* Inbox and rules use the same metadata/body/action cadence. */
+.inbox-tabs button span { font-size: var(--type-micro); }
+.inbox-item b { font-size: var(--type-control); }
+.inbox-item small { font-size: var(--type-micro); }
+.inbox-item p { font-size: var(--type-caption); line-height: 1.5; }
+.inbox-item > div > button { min-height: 36px; font-size: var(--type-caption); }
+.weekly-digest > span { font-size: var(--type-micro); }
+.weekly-digest h3 { font-size: var(--type-subtitle); }
+.weekly-digest p { font-size: var(--type-caption); line-height: 1.55; }
+.weekly-digest button { min-height: 40px; font-size: var(--type-control); }
+.rule-card > div span { font-size: var(--type-caption); }
+.rule-card > div em { font-size: var(--type-micro); }
+
+/* Device cards follow the same hierarchy as every other operational card. */
+.connector-head h3 { font-size: var(--type-control); }
+.connector-head p,
+.connector-status,
+.capabilities span,
+.connector-footer > span { font-size: var(--type-micro); }
+.connector-note { min-height: 38px; font-size: var(--type-caption); line-height: 1.45; }
+.connector-footer button { min-height: 36px; font-size: var(--type-caption); }
+.architecture-copy h2 { font-size: var(--type-section); line-height: var(--leading-tight); }
+.architecture-copy p { font-size: var(--type-caption); line-height: 1.5; }
+.flow-diagram span { font-size: var(--type-micro); }
+
+.management-toolbar h3 { font-size: var(--type-section); }
+.management-toolbar p { font-size: var(--type-caption); line-height: 1.45; }
+.management-toolbar .local-search input,
+.management-toolbar .secondary-button,
+.management-toolbar .primary-button { font-size: var(--type-control); }
+
+.modal > header h2 {
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -.025em;
+}
+.modal > header p { font-size: var(--type-caption); line-height: 1.5; }
+.form-grid label > span,
+.modal-form label > span,
+.review-note > span { font-size: var(--type-caption); }
+.form-grid input,
+.form-grid select,
+.form-grid textarea,
+.modal-form input,
+.modal-form select,
+.modal-form textarea,
+.review-note textarea { font-size: var(--type-body); }
+
+/* RKF command center follows the same hierarchy as the coach shell. */
+.rkf-kicker,
+.rkf-decision small,
+.rkf-readout-grid small,
+.rkf-load-layers small,
+.rkf-signal-card > small,
+.rkf-seed-card > small,
+.rkf-entitlement-card > small { font-size: var(--type-micro); }
+.rkf-decision p,
+.rkf-readout-grid span,
+.rkf-work-queue small,
+.rkf-load-layers p,
+.rkf-signal-card p,
+.rkf-alerts p,
+.rkf-convention p { font-size: var(--type-caption); }
+.rkf-work-queue strong,
+.rkf-alerts strong,
+.rkf-convention strong { font-size: var(--type-control); }
+
+@media (max-width: 760px) {
+  :root {
+    --type-micro: 11px;
+    --type-caption: 12px;
+    --type-control: 13px;
+    --type-body: 14px;
+    --type-subtitle: 16px;
+    --type-section: 20px;
+    --type-page: 30px;
+  }
+  .content { padding: 25px 17px 56px; }
+  .page-title { align-items: stretch; gap: 16px; margin-bottom: 22px; }
+  .page-title h1 { letter-spacing: -.035em; }
+  .page-title p { max-width: 36rem; margin-top: 8px; }
+  .today-layout .card,
+  .athlete-dashboard .card,
+  .season-columns .card,
+  .analytics-grid .card,
+  .inbox-layout .card { padding: 18px; }
+  .metric-card { min-height: 104px; padding: 15px; }
+  .metric-card strong { font-size: 22px; }
+  .skill-pills { gap: 2px; }
+  .skill-pills i { width: 18px; height: 20px; font-size: 11px; }
+  .automation-actions { width: 100%; }
+  .automation-actions button { min-height: 42px; }
+  .modal > header h2 { font-size: 21px; }
 }

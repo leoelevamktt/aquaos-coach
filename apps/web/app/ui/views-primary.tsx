@@ -8,7 +8,7 @@ import {
   Plus, Search, SlidersHorizontal, Smartphone, Sparkles, Target, Trophy, Upload, UserPlus,
   UserRound, Users, Watch, Waves,
 } from "lucide-react";
-import { athletes, hydrateAthlete, insights, meets as demoMeets, practices, strengthLibrary, workoutLibrary, zoneDistribution, type AthleteProfile } from "./demo-data";
+import { athletes, hydrateAthlete, meets as demoMeets, practices, strengthLibrary, workoutLibrary, zoneDistribution, type AthleteProfile } from "./demo-data";
 import { Avatar, formatNumber, Metric, PageTitle, ProgressRing, SectionHead, StatusDot } from "./components";
 import { API_URL, apiRequest, importFile } from "./api";
 import { csvRow, downloadFile } from "./client-utils";
@@ -20,6 +20,10 @@ import { WorkoutTemplateEditor, type WorkoutSeed } from "./workout-library-actio
 
 export type AppView = "today" | "athletes" | "practices" | "seasons" | "videos" | "analytics" | "rkf" | "inbox" | "integrations" | "settings";
 
+type AutomationProposal = { id: string; athleteId: string; athleteName: string; priority: "CRITICAL" | "HIGH" | "MEDIUM" | "OPPORTUNITY"; action: string; title: string; rationale: string; triggers: string[]; requiresCoachApproval: boolean; updatedAt: string };
+type AutomationSnapshot = { engineVersion: string; latestRun?: { updatedAt?: string; cause?: string }; counts: { critical: number; high: number; medium: number; opportunity: number; requiringApproval: number }; proposals: AutomationProposal[] };
+type TodayAnalytics = { metrics: { plannedMeters: number; completedMeters: number; adherence: number | null }; weekly: Array<{ label: string; plannedMeters: number; completedMeters: number }> };
+
 export function Today({ onCreate, onNavigate, onAthlete, onNotify, liveVersion = 0 }: { onCreate: () => void; onNavigate: (view: AppView) => void; onAthlete: (id: string) => void; onNotify: (message: string) => void; liveVersion?: number }) {
   // Data e saudação ao vivo (cliente, evita mismatch de hidratação)
   const [today, setToday] = useState<{ kicker: string; greeting: string } | null>(null);
@@ -28,6 +32,9 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify, liveVersion =
   // Próxima competição do calendário (fallback: demo em dev)
   const [meet, setMeet] = useState<{ name: string; startsOn?: string; pool?: string; priority?: string; qualified?: number; entries?: number } | null>(null);
   const [videoSummary, setVideoSummary] = useState({ total: 0, pending: 0 });
+  const [automation, setAutomation] = useState<AutomationSnapshot | null>(null);
+  const [analytics, setAnalytics] = useState<TodayAnalytics | null>(null);
+  const [automationBusy, setAutomationBusy] = useState<string | null>(null);
 
   useEffect(() => {
     const now = new Date();
@@ -54,6 +61,8 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify, liveVersion =
     void apiRequest<{ data: Array<Record<string, unknown>> }>("/api/v1/manage/videos")
       .then((response) => setVideoSummary({ total: response.data.length, pending: response.data.filter((video) => String(video.status ?? "").toLowerCase() !== "reviewed").length }))
       .catch(() => setVideoSummary({ total: 0, pending: 0 }));
+    void apiRequest<AutomationSnapshot>("/api/v1/coach/automation").then(setAutomation).catch(() => setAutomation(null));
+    void apiRequest<TodayAnalytics>("/api/v1/analytics/overview?weeks=8").then(setAnalytics).catch(() => setAnalytics(null));
   }, [liveVersion]);
 
   const displayAthletes = roster ?? [];
@@ -66,6 +75,31 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify, liveVersion =
   const readyCount = readinessValues.filter((value) => value >= 70).length;
   const attentionCount = readinessValues.filter((value) => value < 70).length;
   const attendanceAverage = displayAthletes.length ? Math.round(displayAthletes.reduce((sum, athlete) => sum + athlete.attendance, 0) / displayAthletes.length) : null;
+  const automationQueue = automation?.proposals.slice().sort((a, b) => ({ CRITICAL: 0, HIGH: 1, OPPORTUNITY: 2, MEDIUM: 3 }[a.priority] - { CRITICAL: 0, HIGH: 1, OPPORTUNITY: 2, MEDIUM: 3 }[b.priority])) ?? [];
+  const chartSeries = analytics?.weekly ?? [];
+  const chartMax = Math.max(1, ...chartSeries.flatMap((week) => [week.plannedMeters, week.completedMeters]));
+  const automationSubtitle = automation ? `${automation.counts.requiringApproval} aguardam aprovação · ${automation.counts.critical + automation.counts.high} prioritárias` : "Calculando sinais do programa";
+
+  const refreshAutomation = async () => {
+    setAutomationBusy("recompute");
+    try {
+      const result = await apiRequest<AutomationSnapshot>("/api/v1/coach/automation/recompute", { method: "POST" });
+      setAutomation(result); onNotify("Programa recalculado com os dados mais recentes.");
+    } catch (error) { onNotify(error instanceof Error ? error.message : "Não foi possível recalcular o programa."); }
+    finally { setAutomationBusy(null); }
+  };
+  const decideAutomation = async (proposal: AutomationProposal, decision: "approve" | "dismiss") => {
+    setAutomationBusy(proposal.id);
+    try {
+      const response = await apiRequest<{ message?: string } | AutomationProposal>(`/api/v1/coach/automation/proposals/${proposal.id}/${decision}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(decision === "dismiss" ? { reason: "Plano mantido após revisão da comissão técnica." } : {}),
+      });
+      setAutomation(await apiRequest<AutomationSnapshot>("/api/v1/coach/automation"));
+      onNotify("message" in response && response.message ? response.message : "Decisão técnica registrada.");
+    } catch (error) { onNotify(error instanceof Error ? error.message : "Não foi possível registrar a decisão."); }
+    finally { setAutomationBusy(null); }
+  };
 
   const exportDailyReport = () => {
     const rows = [csvRow(["Indicador", "Valor"]), csvRow(["Atletas ativos", displayAthletes.length]), csvRow(["Volume semanal", `${(weeklyVolumeM / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km`]), csvRow(["Readiness médio", readinessAverage ?? "sem dados"]), csvRow(["Presença", attendanceAverage == null ? "sem dados" : `${attendanceAverage}%`]), csvRow(["Provas filmadas", videoSummary.total])];
@@ -73,7 +107,7 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify, liveVersion =
     onNotify("Relatório operacional exportado em CSV.");
   };
   return <>
-    <PageTitle kicker={today?.kicker ?? "CARREGANDO…"} title={today?.greeting ?? "Bom dia, Leonardo."} subtitle="A equipe está estável. Há duas decisões importantes antes da sessão da tarde.">
+    <PageTitle kicker={today?.kicker ?? "CARREGANDO…"} title={today?.greeting ?? "Bom dia, Leonardo."} subtitle={automation ? `${automation.counts.critical + automation.counts.high} sinais prioritários e ${automation.counts.opportunity} oportunidade de progressão foram recalculados.` : "Recalculando o estado operacional da equipe…"}>
       <button className="secondary-button" onClick={exportDailyReport}><Download size={17} />Relatório</button><button className="primary-button" onClick={onCreate}><Plus size={17} />Novo treino</button>
     </PageTitle>
     <section className="hero-grid">
@@ -110,15 +144,23 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify, liveVersion =
         </article>
       </div>
       <aside className="stack">
-        <article className="card attention-card">
-          <SectionHead title="Para decidir" subtitle="Priorizado pelo impacto" action="Ver tudo" onAction={() => onNavigate("inbox")} />
-          {insights.slice(0, 3).map((item) => <button className="insight-row" key={item.id} onClick={() => item.target === "videos" ? onNavigate("videos") : onAthlete(item.target)}><span className={`insight-icon ${item.type}`}>{item.type === "critical" ? <HeartPulse size={17} /> : item.type === "video" ? <Film size={17} /> : <Activity size={17} />}</span><span><b>{item.title}</b><small>{item.body}</small></span><ArrowRight size={15} /></button>)}
+        <article className="card attention-card automation-card">
+          <SectionHead title="Central adaptativa" subtitle={automationSubtitle} action={automationBusy === "recompute" ? "Calculando…" : "Recalcular"} onAction={() => void refreshAutomation()} />
+          <div className="automation-summary"><span className="critical"><b>{automation?.counts.critical ?? 0}</b> críticos</span><span className="high"><b>{automation?.counts.high ?? 0}</b> atenção</span><span className="opportunity"><b>{automation?.counts.opportunity ?? 0}</b> progressão</span></div>
+          <div className="automation-list">
+            {automationQueue.slice(0, 3).map((proposal) => <article className={`automation-item ${proposal.priority.toLowerCase()}`} key={proposal.id}>
+              <button className="automation-copy" onClick={() => onAthlete(proposal.athleteId)}><span className="automation-priority">{proposal.priority === "CRITICAL" ? "CRÍTICO" : proposal.priority === "HIGH" ? "ATENÇÃO" : proposal.priority === "OPPORTUNITY" ? "OPORTUNIDADE" : "MONITORAR"}</span><b>{proposal.title}</b><p>{proposal.rationale}</p><span className="automation-triggers">{proposal.triggers.slice(0, 2).map((trigger) => <em key={trigger}>{trigger}</em>)}</span></button>
+              <div className="automation-actions">{proposal.requiresCoachApproval ? <><button disabled={automationBusy === proposal.id} onClick={() => void decideAutomation(proposal, "approve")}>Criar ajuste</button><button disabled={automationBusy === proposal.id} onClick={() => void decideAutomation(proposal, "dismiss")}>Manter plano</button></> : <button disabled={automationBusy === proposal.id} onClick={() => void decideAutomation(proposal, "dismiss")}>Reconhecer</button>}</div>
+            </article>)}
+            {!automationQueue.length && <div className="automation-empty"><CircleCheck size={22} /><div><b>Programa dentro dos guardrails</b><small>Nenhuma decisão pendente neste momento.</small></div></div>}
+          </div>
+          <p className="automation-footnote"><Activity size={13} />Atualiza após treino, resultado, check-in, carga ou alteração de prescrição. Ajustes de carga exigem aprovação.</p>
         </article>
         <article className="card load-card">
           <SectionHead title="Carga da equipe" subtitle="Últimas 8 semanas" action="Analisar" onAction={() => onNavigate("analytics")} />
-          <div className="mini-bars">{[42, 56, 51, 68, 72, 65, 81, 76].map((height, index) => <span key={index} style={{ height: `${height}%` }} className={index === 7 ? "current" : ""} />)}</div>
-          <div className="load-summary"><div><small>AGUDA</small><b>538</b></div><div><small>CRÔNICA</small><b>504</b></div><div><small>ACWR</small><b>1,07</b></div></div>
-          <p className="demo-caption"><Sparkles size={13} />RkfLoadEngine V5.1 com dados sintéticos de validação.</p>
+          <div className="mini-bars dynamic-bars">{chartSeries.map((week, index) => <span className="load-week" key={`${week.label}-${index}`} title={`${week.label}: ${formatNumber(week.completedMeters)} m realizados`}><i className="load-plan" style={{ height: `${Math.max(3, week.plannedMeters / chartMax * 100)}%` }} /><i className="load-done" style={{ height: `${Math.max(3, week.completedMeters / chartMax * 100)}%` }} /><small>{week.label}</small></span>)}</div>
+          <div className="load-summary"><div><small>PLANEJADO</small><b>{formatNumber(analytics?.metrics.plannedMeters ?? 0)} m</b></div><div><small>REALIZADO</small><b>{formatNumber(analytics?.metrics.completedMeters ?? 0)} m</b></div><div><small>ADERÊNCIA</small><b>{analytics?.metrics.adherence == null ? "—" : `${analytics.metrics.adherence.toFixed(1).replace(".", ",")}%`}</b></div></div>
+          <p className="demo-caption"><Activity size={13} />Métricas recalculadas a partir de prescrições e execuções registradas.</p>
         </article>
       </aside>
     </section>
@@ -232,7 +274,7 @@ export function AthleteDetail({ athlete, onBack, onCreate, onNavigate, onNotify 
   </>;
 }
 
-type PublishedWorkoutRecord = { id: string; title?: string; status?: string; date?: string; scheduledAt?: string; distanceMeters?: number; zone?: string; kind?: string; target?: string; source?: string; prescriptionText?: string; blocks?: string[] };
+type PublishedWorkoutRecord = { id: string; title?: string; status?: string; date?: string; scheduledAt?: string; distanceMeters?: number; zone?: string; kind?: string; target?: string; athleteId?: string; source?: string; prescriptionText?: string; blocks?: string[] };
 
 export function Practices({ onCreate, onNotify, refreshToken = 0 }: { onCreate: (seed?: WorkoutSeed) => void; onNotify: (message: string) => void; refreshToken?: number }) {
   const [tab, setTab] = useState<"week" | "swim" | "strength">("week");
@@ -242,7 +284,7 @@ export function Practices({ onCreate, onNotify, refreshToken = 0 }: { onCreate: 
   const [libraryRefresh, setLibraryRefresh] = useState(0);
   useEffect(() => {
     apiRequest<{ data: PublishedWorkoutRecord[] }>("/api/v1/manage/workouts")
-      .then((response) => { setPublished(response.data.filter((item) => item.source === "coach-publish")); setLibraryRecords(response.data.filter((item) => item.source === "library")); })
+      .then((response) => { setPublished(response.data.filter((item) => item.source === "coach-publish" || item.source === "coach-automation")); setLibraryRecords(response.data.filter((item) => item.source === "library")); })
       .catch(() => { setPublished([]); setLibraryRecords([]); });
   }, [refreshToken, libraryRefresh]);
   return <>
@@ -288,8 +330,8 @@ function WeekCalendar({ onCreate, published }: { onCreate: (seed?: WorkoutSeed) 
   const days = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(monday.getTime() + index * 86_400_000);
     const iso = date.toISOString().slice(0, 10);
-    const synced = published.filter((record) => record.date === iso).map((record) => ({ id: record.id, title: record.title ?? "Treino publicado", distance: Number(record.distanceMeters ?? 0), zone: record.zone ?? "A1", type: record.kind === "strength" ? "strength" as const : "swim" as const, time: record.scheduledAt?.slice(11, 16) ?? "08:00", status: "published" as const, group: record.target ?? "Equipe inteira" }));
-    const sessions = [...practices.filter((practice) => practice.date === iso).map((practice) => ({ id: practice.id, title: practice.title, distance: practice.distance, zone: practice.zone, type: practice.type === "strength" ? "strength" as const : "swim" as const, time: practice.time, status: practice.status as "published" | "draft", group: practice.group })), ...synced];
+    const synced = published.filter((record) => record.date === iso).map((record) => ({ id: record.id, persistedId: record.id, title: record.title ?? "Treino publicado", distance: Number(record.distanceMeters ?? 0), zone: record.zone ?? "A1", type: record.kind === "strength" ? "strength" as const : "swim" as const, time: record.scheduledAt?.slice(11, 16) ?? "08:00", scheduledAt: record.scheduledAt ?? `${iso}T08:00`, status: record.status === "published" ? "published" as const : "draft" as const, group: record.target ?? (record.athleteId ? `Individual · ${record.athleteId}` : "Equipe inteira"), prompt: record.prescriptionText ?? "Sessão registrada na agenda.", source: record.source }));
+    const sessions = [...practices.filter((practice) => practice.date === iso).map((practice) => ({ id: practice.id, persistedId: undefined, title: practice.title, distance: practice.distance, zone: practice.zone, type: practice.type === "strength" ? "strength" as const : "swim" as const, time: practice.time, scheduledAt: `${iso}T${practice.time}`, status: practice.status as "published" | "draft", group: practice.group, prompt: `${practice.title}\n${practice.distance ? `${practice.distance} m` : "Sessão de força"}\n${practice.group}`, source: "calendar-demo" })), ...synced];
     return { iso, day: names[date.getUTCDay()], date: String(date.getUTCDate()).padStart(2, "0"), month: monthNames[date.getUTCMonth()], sessions, load: Math.round(sessions.reduce((sum, session) => sum + session.distance, 0) / 8) };
   });
   const first = days[0]; const last = days[6];
@@ -297,7 +339,7 @@ function WeekCalendar({ onCreate, published }: { onCreate: (seed?: WorkoutSeed) 
   const totalLoad = days.reduce((sum, day) => sum + day.load, 0);
   return <section className="card calendar-card">
     <div className="calendar-toolbar"><div><button className="icon-button" aria-label="Semana anterior" onClick={() => setWeekOffset((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Próxima semana" onClick={() => setWeekOffset((value) => value + 1)}><ChevronRight size={18} /></button><button className="secondary-button small" onClick={() => setWeekOffset(0)}>Esta semana</button></div><strong>{weekLabel}</strong><div className="week-load"><Sparkles size={15} />Carga prevista <b>{formatNumber(totalLoad)}</b></div></div>
-    <div className="week-grid">{days.map((day) => <div className={`day-column ${day.iso === todayIso ? "today" : ""}`} key={day.iso}><div className="day-head"><span>{day.day}</span><b>{day.date}</b><small>{day.load ? `${day.load} u.a.` : "Descanso"}</small></div><div className="day-content">{day.sessions.length ? day.sessions.map((session) => <button className={`practice-card ${session.type}`} key={session.id} onClick={() => onCreate({ id: session.id, title: session.title, prompt: `${session.title}\n${session.distance ? `${session.distance} m` : "Sessão de força"}\n${session.group}`, distanceMeters: session.distance, zone: session.zone, kind: session.type })}><span><i />{session.time}</span><strong>{session.title}</strong><small>{session.distance ? `${formatNumber(session.distance)} m` : "55 min"} · {session.group}</small><div><span className={`zone-tag ${session.zone.toLowerCase()}`}>{session.zone}</span><em>{session.status === "published" ? <><CircleCheck size={12} />Publicado</> : "Rascunho"}</em></div></button>) : <button className="empty-day" onClick={() => onCreate()}><Plus size={17} />Planejar o dia</button>}</div></div>)}</div>
+    <div className="week-grid">{days.map((day) => <div className={`day-column ${day.iso === todayIso ? "today" : ""}`} key={day.iso}><div className="day-head"><span>{day.day}</span><b>{day.date}</b><small>{day.load ? `${day.load} u.a.` : "Descanso"}</small></div><div className="day-content">{day.sessions.length ? day.sessions.map((session) => <button className={`practice-card ${session.type}`} key={session.id} onClick={() => onCreate({ id: session.id, persistedId: session.persistedId, title: session.title, prompt: session.prompt, distanceMeters: session.distance, zone: session.zone, kind: session.type, scheduledAt: session.scheduledAt, target: session.group, source: session.source })}><span><i />{session.time}</span><strong>{session.title}</strong><small>{session.distance ? `${formatNumber(session.distance)} m` : "55 min"} · {session.group}</small><div><span className={`zone-tag ${session.zone.toLowerCase()}`}>{session.zone}</span><em>{session.status === "published" ? <><CircleCheck size={12} />Publicado</> : "Rascunho"}</em></div></button>) : <button className="empty-day" aria-label={`Planejar ${day.day}, ${day.date} de ${day.month}`} onClick={() => onCreate({ title: `Sessão de ${day.day.toLowerCase()} · ${day.date}/${String(new Date(`${day.iso}T12:00:00`).getMonth() + 1).padStart(2, "0")}`, prompt: "", distanceMeters: 0, zone: "A1", kind: "swim", scheduledAt: `${day.iso}T08:00`, target: "Equipe inteira" })}><Plus size={17} />Planejar o dia</button>}</div></div>)}</div>
     <div className="calendar-footer"><div><span><i className="swim-dot" />Natação</span><span><i className="strength-dot" />Força</span><span><i className="draft-dot" />Rascunho</span></div><p><Sparkles size={13} />Cargas estimadas pelo RkfLoadEngine</p></div>
   </section>;
 }

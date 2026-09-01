@@ -13,6 +13,7 @@ import { registerRkfRoutes } from "./rkf-routes.js";
 import { registerRkfSeedCatalogRoutes } from "./rkf-seed-catalog.js";
 import { registerRkfDecisionRoutes } from "./rkf-decisions.js";
 import { registerReportRoutes } from "./report-routes.js";
+import { registerCoachAutomationRoutes } from "./coach-automation.js";
 import { basename } from "node:path";
 import { createHash } from "node:crypto";
 import { VideoAnalysisQueue } from "./video-analysis-queue.js";
@@ -52,6 +53,7 @@ registerRkfRoutes(app, managedStore);
 registerRkfSeedCatalogRoutes(app);
 registerRkfDecisionRoutes(app, managedStore);
 registerReportRoutes(app, managedStore);
+registerCoachAutomationRoutes(app, managedStore);
 app.addHook("onClose", async () => { await managedStore.close(); });
 
 app.get("/api/v1/health", async () => ({ ok: true, service: "natacao-api", mode: process.env.NODE_ENV === "production" ? "production" : "validation", persistence, timestamp: new Date().toISOString() }));

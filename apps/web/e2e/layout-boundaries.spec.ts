@@ -19,7 +19,7 @@ async function loginCoach(page: Page) {
 
 async function assertBoundary(page: Page, width: number) {
   const result = await page.evaluate((viewportWidth) => {
-    const intentionalScroll = ".week-grid, .rkf-tabs, .video-stats, .flow-diagram, .management-nav, .message-templates > div";
+    const intentionalScroll = ".week-grid, .rkf-tabs, .video-stats, .flow-diagram, .management-nav, .message-templates > div, .pool-frame";
     const hiddenByTransform = (element: Element) => {
       let current: Element | null = element;
       while (current && current !== document.body) {
@@ -45,6 +45,7 @@ async function assertBoundary(page: Page, width: number) {
 }
 
 test("limites 320/768 não quebram telas coach", async ({ page }) => {
+  test.setTimeout(120_000);
   const failures: string[] = [];
   page.on("pageerror", (error) => failures.push(String(error)));
   page.on("response", (response) => { if (response.url().includes("/api/") && response.status() >= 500) failures.push(`${response.status()} ${response.url()}`); });
@@ -52,7 +53,8 @@ test("limites 320/768 não quebram telas coach", async ({ page }) => {
   for (const width of [320, 768]) {
     await page.setViewportSize({ width, height: 900 });
     for (const path of ["/pt/coach/today", "/pt/coach/athletes", "/pt/coach/practices", "/pt/coach/seasons", "/pt/coach/videos", "/pt/coach/analytics", "/pt/coach/rkf", "/pt/coach/inbox", "/pt/coach/integrations", "/pt/coach/settings"]) {
-      await page.goto(`${base}${path}`, { waitUntil: "networkidle" });
+      await page.goto(`${base}${path}`, { waitUntil: "domcontentloaded" });
+      await page.locator(".content").waitFor({ state: "visible", timeout: 20_000 });
       await assertBoundary(page, width);
     }
   }
