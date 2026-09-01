@@ -9,10 +9,13 @@ import { athleteMayAccess, attachAuthStore, getSession, login, logout, provision
 import { ManagedStore } from "./managed-store.js";
 import { registerOperationalRoutes, uploadRoot } from "./operational-routes.js";
 import { registerAiRoutes } from "./ai-routes.js";
+import { registerCoachBriefingRoutes } from "./coach-briefing-routes.js";
+import { registerAthleteAppRoutes } from "./athlete-app-routes.js";
 import { registerRkfRoutes } from "./rkf-routes.js";
 import { registerRkfSeedCatalogRoutes } from "./rkf-seed-catalog.js";
 import { registerRkfDecisionRoutes } from "./rkf-decisions.js";
 import { registerReportRoutes } from "./report-routes.js";
+import { invitationProfileSchema } from "./invitation-profile-schema.js";
 import { basename } from "node:path";
 import { createHash } from "node:crypto";
 import { VideoAnalysisQueue } from "./video-analysis-queue.js";
@@ -48,6 +51,8 @@ app.addHook("onRequest", async (request, reply) => {
 await app.register(fastifyStatic, { root: uploadRoot, prefix: "/uploads/", decorateReply: false });
 registerOperationalRoutes(app, managedStore, videoQueue);
 registerAiRoutes(app, managedStore);
+registerCoachBriefingRoutes(app, managedStore);
+registerAthleteAppRoutes(app, managedStore, store);
 registerRkfRoutes(app, managedStore);
 registerRkfSeedCatalogRoutes(app);
 registerRkfDecisionRoutes(app, managedStore);
@@ -91,7 +96,7 @@ app.post("/api/v1/invitations/:token/accept", async (request, reply) => {
   const params = z.object({ token: z.string().min(20).max(160) }).safeParse(request.params);
   if (!params.success) return reply.code(404).send({ error: "Convite inexistente, expirado ou já utilizado" });
   const { token } = params.data;
-  const body = z.object({ password: z.string().min(8).max(200), name: z.string().trim().min(2).max(160).optional(), profile: z.record(z.unknown()).optional() }).safeParse(request.body);
+  const body = z.object({ password: z.string().min(8).max(200), name: z.string().trim().min(2).max(160).optional(), profile: invitationProfileSchema.optional() }).safeParse(request.body);
   if (!body.success) return reply.code(400).send({ error: "Aceite de convite inválido", details: body.error.flatten() });
   const invitation = managedStore.list("invitations").find((item) => item.tokenHash === createHash("sha256").update(token).digest("hex"));
   if (!invitation || invitation.status !== "pending" || String(invitation.expiresAt ?? "") <= new Date().toISOString()) return reply.code(404).send({ error: "Convite inexistente, expirado ou já utilizado" });
@@ -99,10 +104,7 @@ app.post("/api/v1/invitations/:token/accept", async (request, reply) => {
   if (!athlete || typeof invitation.email !== "string") return reply.code(404).send({ error: "Atleta do convite não encontrado" });
   const provisioned = provisionInvitedAthlete({ athleteId: athlete.id, organizationId: String(invitation.organizationId ?? "org-demo"), name: body.data.name ?? String(athlete.name ?? "Atleta"), email: invitation.email, password: body.data.password });
   if ("error" in provisioned) return reply.code(provisioned.error === "email_in_use" ? 409 : 400).send({ error: provisioned.error === "email_in_use" ? "E-mail já possui uma conta" : "A senha deve ter ao menos 8 caracteres" });
-  const profile = body.data.profile ?? {};
-  const allowedProfile = ["birthDate", "sex", "category", "events", "otherEvent", "level", "club", "targetMeet", "meetDate", "primaryEvent", "secondaryEvent", "objective", "availability"];
-  const profilePatch = Object.fromEntries(Object.entries(profile).filter(([key]) => allowedProfile.includes(key)));
-  managedStore.update("athletes", athlete.id, { name: body.data.name ?? athlete.name, email: invitation.email, status: "active", onboardingStatus: "completed", ...profilePatch }, "update");
+  managedStore.update("athletes", athlete.id, { name: body.data.name ?? athlete.name, email: invitation.email, status: "active", onboardingStatus: "completed", ...(body.data.profile ?? {}) }, "update");
   managedStore.update("invitations", invitation.id, { status: "accepted", acceptedAt: new Date().toISOString(), acceptedBy: provisioned.user.id }, "update");
   const session = await login(invitation.email, body.data.password);
   if (!session) return reply.code(500).send({ error: "Conta criada, mas não foi possível iniciar a sessão" });
@@ -155,6 +157,10 @@ app.patch("/api/v1/athlete/profile", async (request, reply) => {
     secondaryEvent: z.string().trim().max(80).optional(),
     objective: z.string().trim().max(160).optional(),
     availability: z.object({ sessionsPerWeek: z.number().int().min(3).max(12), days: z.array(z.string()).max(7), periods: z.array(z.string()).max(3) }).optional(),
+    consents: z.object({
+      medical: z.object({ acceptedAt: z.string().datetime(), version: z.string().trim().min(1).max(40), origin: z.string().trim().min(1).max(80) }),
+      responsibility: z.object({ acceptedAt: z.string().datetime(), version: z.string().trim().min(1).max(40), origin: z.string().trim().min(1).max(80) }),
+    }).optional(),
     onboardingStatus: z.literal("completed").optional(),
   }).safeParse(request.body);
   if (!body.success) return reply.code(400).send({ error: "Perfil de atleta inválido", details: body.error.flatten() });

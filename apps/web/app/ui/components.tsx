@@ -65,6 +65,11 @@ export function ModalShell({ title, subtitle, onClose, children, wide = false, c
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section ref={dialog} className={`modal ${wide ? "modal-wide" : ""} ${className}`.trim()} role="dialog" aria-modal="true" aria-label={title}><header><div><h2>{title}</h2><p>{subtitle}</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Fechar"><X size={19} /></button></header>{children}</section></div>;
 }
 
+/** Placeholder neutro de carregamento; o visual vem das classes CSS "skeleton"/"skeleton-line". */
+export function Skeleton({ className = "", height }: { className?: string; height?: number }) {
+  return <div className={["skeleton", "skeleton-line", className].filter(Boolean).join(" ")} style={height ? { height } : undefined} aria-hidden="true" />;
+}
+
 export function formatNumber(value: number) {
   const [integer, decimal] = String(value).split(".");
   const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ".");

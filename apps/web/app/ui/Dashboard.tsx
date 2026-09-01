@@ -4,23 +4,24 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 import {
-  ArrowRight, BarChart3, Bell, Calendar, ChevronDown, CircleCheck, Film, Gauge, Home, Inbox, Link2,
+  AlertTriangle, ArrowRight, BarChart3, Bell, Calendar, ChevronDown, CircleCheck, Film, Gauge, Home, Inbox, Link2,
   LogOut, Menu, Plus, Search, Settings, SlidersHorizontal, Sparkles, Trophy, Users, Waves,
   Wifi,
 } from "lucide-react";
 import { athletes, hydrateAthlete, meets, videos, type AthleteProfile } from "./demo-data";
 import { Avatar } from "./components";
-import { AthleteDetail, Practices, Team, Today, type AppView } from "./views-primary";
+import { AthleteDetail, Practices, Team, Today, type AppView, type Briefing } from "./views-primary";
 import { Analytics, Integrations, News, ProgramSettings, Season, Videos } from "./views-secondary";
 import { ConnectionDialog, InviteModal, MeetDetail, QuickCreate, VideoReview, WorkoutComposer } from "./modals";
 import { ManagementCenter, type ManagementKind } from "./management";
 import type { WorkoutSeed } from "./workout-library-actions";
+import { AiWorkoutModal } from "./ai-workout-modal";
 import { AiAssistant } from "./ai-assistant";
 import { RkfOperations } from "./rkf-operations";
 import { AuthGate } from "./auth-gate";
 import { apiRequest, subscribeToLiveEvents } from "./api";
 
-type Modal = "workout" | "invite" | "video" | "meet" | "command" | "manage" | "connection" | null;
+type Modal = "workout" | "ai-workout" | "invite" | "video" | "meet" | "command" | "manage" | "connection" | null;
 
 const routes: Record<AppView, string> = {
   today: "/pt/coach/today", athletes: "/pt/coach/athletes", practices: "/pt/coach/practices",
@@ -28,12 +29,12 @@ const routes: Record<AppView, string> = {
   rkf: "/pt/coach/rkf", inbox: "/pt/coach/inbox", integrations: "/pt/coach/integrations", settings: "/pt/coach/settings",
 };
 
-const nav: { id: AppView; label: string; icon: LucideIcon; badge?: number }[] = [
+const nav: { id: AppView; label: string; icon: LucideIcon }[] = [
   { id: "today", label: "Hoje", icon: Home }, { id: "athletes", label: "Equipe", icon: Users },
   { id: "practices", label: "Treinos", icon: Calendar }, { id: "seasons", label: "Temporada", icon: Trophy },
-  { id: "videos", label: "Vídeos", icon: Film, badge: 2 }, { id: "analytics", label: "Análise", icon: BarChart3 },
+  { id: "videos", label: "Vídeos", icon: Film }, { id: "analytics", label: "Análise", icon: BarChart3 },
   { id: "rkf", label: "Núcleo RKF", icon: Gauge },
-  { id: "inbox", label: "Novidades", icon: Inbox, badge: 5 }, { id: "integrations", label: "Integrações", icon: Link2 },
+  { id: "inbox", label: "Novidades", icon: Inbox }, { id: "integrations", label: "Integrações", icon: Link2 },
 ];
 
 function viewFromPath(pathname: string): AppView {
@@ -55,7 +56,7 @@ function CoachWorkspace() {
   const view = viewFromPath(pathname);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
-  const [toast, setToast] = useState("");
+  const [toast, setToast] = useState<{ message: string; variant: "success" | "error" } | null>(null);
   const [search, setSearch] = useState("");
   const [manageKind, setManageKind] = useState<ManagementKind>("athletes");
   const [createManaged, setCreateManaged] = useState(false);
@@ -68,12 +69,14 @@ function CoachWorkspace() {
   const [liveStatus, setLiveStatus] = useState<"connecting" | "open" | "error">("connecting");
   const [signingOut, setSigningOut] = useState(false);
   const [managedAthletes, setManagedAthletes] = useState<AthleteProfile[]>(athletes);
+  const [briefing, setBriefing] = useState<Briefing | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const athleteId = pathname.split("/athletes/")[1]?.split("/")[0];
   const selectedAthlete = managedAthletes.find((athlete) => athlete.id === athleteId);
 
   const go = (next: AppView) => { router.push(routes[next]); setMobileOpen(false); };
-  const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 3200); };
+  const notify = (message: string, variant: "success" | "error" = "success") => { setToast({ message, variant }); window.setTimeout(() => setToast(null), 3200); };
+  const navBadges: Partial<Record<AppView, number>> = briefing ? { videos: briefing.metrics.pendingVideos, inbox: briefing.metrics.pendingInvitations + briefing.metrics.expiringInvitations } : {};
   const openManage = (kind: ManagementKind = "athletes", create = false) => { setManageKind(kind); setCreateManaged(create); setModal("manage"); };
   const openWorkout = (seed?: WorkoutSeed) => { setWorkoutSeed(seed); setModal("workout"); };
   const searchResults = search.trim() ? [
@@ -85,7 +88,10 @@ function CoachWorkspace() {
     setSigningOut(true);
     try { await apiRequest("/api/v1/auth/logout", { method: "POST" }); }
     catch { /* sessão já pode ter expirado */ }
-    finally { window.location.assign("/pt/coach/today"); }
+    finally {
+      sessionStorage.setItem("natacao_skip_demo_login", "1");
+      window.location.assign("/pt/coach/today");
+    }
   };
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
@@ -101,6 +107,11 @@ function CoachWorkspace() {
       .then((response) => setManagedAthletes(response.data.map(hydrateAthlete)))
       .catch(() => setManagedAthletes(athletes));
   }, [liveVersion]);
+  useEffect(() => {
+    void apiRequest<Briefing>("/api/v1/coach/briefing")
+      .then((payload) => setBriefing(payload))
+      .catch(() => setBriefing(null));
+  }, [liveVersion]);
 
   return <div className="app-shell">
     <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
@@ -111,7 +122,7 @@ function CoachWorkspace() {
       <button className="team-switch" onClick={() => openManage("settings")}><span className="team-badge">SN</span><span><strong>Seleção Nacional</strong><small>Programa principal</small></span><ChevronDown size={15} /></button>
       <nav className="main-nav">
         <span className="nav-kicker">OPERAÇÃO</span>
-        {nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => go(item.id)}><item.icon size={18} /><span>{item.label}</span>{item.badge && <em>{item.badge}</em>}</button>)}
+        {nav.map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => go(item.id)}><item.icon size={18} /><span>{item.label}</span>{Boolean(navBadges[item.id]) && <em>{navBadges[item.id]}</em>}</button>)}
         <span className="nav-kicker nav-spacer">PROGRAMA</span>
         <button onClick={() => openManage()}><SlidersHorizontal size={18} /><span>Central de gestão</span></button>
         <button className={view === "settings" ? "active" : ""} onClick={() => go("settings")}><Settings size={18} /><span>Configurações</span></button>
@@ -131,7 +142,7 @@ function CoachWorkspace() {
         <div className="top-actions"><div className={`sync-state ${liveStatus === "error" ? "offline" : ""}`}><Wifi size={15} /><span>{liveStatus === "open" ? "Dados em tempo real" : liveStatus === "error" ? "Reconectando dados" : "Conectando dados"}</span></div><button className="icon-button bell-button" onClick={() => go("inbox")} aria-label="Novidades"><Bell size={19} /><i /></button><button className="secondary-button compact manage-button" onClick={() => openManage()}><SlidersHorizontal size={16} />Gerenciar</button><button className="primary-button compact" onClick={() => setModal("command")}><Plus size={17} />Criar</button></div>
       </header>
       <main className="content">
-        {view === "today" && <Today onCreate={() => openWorkout()} onNavigate={go} onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} liveVersion={liveVersion} />}
+        {view === "today" && <Today onCreate={() => openWorkout()} onAiWorkout={() => setModal("ai-workout")} onNavigate={go} onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} liveVersion={liveVersion} />}
         {view === "athletes" && (selectedAthlete ? <AthleteDetail athlete={selectedAthlete} onBack={() => router.push(routes.athletes)} onCreate={() => openWorkout()} onNavigate={go} onNotify={notify} /> : <Team onInvite={() => setModal("invite")} onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} liveVersion={liveVersion} />)}
         {view === "practices" && <Practices onCreate={openWorkout} onNotify={notify} refreshToken={workoutRefresh + liveVersion} />}
         {view === "seasons" && <Season onMeet={(id) => { setMeetId(id); setModal("meet"); }} onSettings={() => go("settings")} onCreateMeet={() => openManage("meets", true)} onNotify={notify} liveVersion={liveVersion} />}
@@ -147,14 +158,15 @@ function CoachWorkspace() {
     <nav className="mobile-nav">
       {nav.slice(0, 5).map((item) => <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => go(item.id)}><item.icon size={19} /><span>{item.label}</span></button>)}
     </nav>
-    {modal === "workout" && <WorkoutComposer seed={workoutSeed} onClose={() => { setModal(null); setWorkoutSeed(undefined); }} onSave={() => { setModal(null); setWorkoutSeed(undefined); setWorkoutRefresh((value) => value + 1); router.push(routes.practices); notify("Treino publicado, salvo no calendário e enviado para sincronização."); }} />}
+    {modal === "workout" && <WorkoutComposer seed={workoutSeed} onClose={() => { setModal(null); setWorkoutSeed(undefined); }} onAiGenerate={() => { setModal("ai-workout"); setWorkoutSeed(undefined); }} onSave={() => { setModal(null); setWorkoutSeed(undefined); setWorkoutRefresh((value) => value + 1); router.push(routes.practices); notify("Treino publicado, salvo no calendário e enviado para sincronização."); }} />}
+    {modal === "ai-workout" && <AiWorkoutModal onClose={() => setModal(null)} onUseComposer={(seed) => { setModal("workout"); setWorkoutSeed(seed); }} onNotify={notify} onPublished={() => setWorkoutRefresh((value) => value + 1)} />}
     {modal === "invite" && <InviteModal onClose={() => setModal(null)} onSave={() => { setModal(null); notify("Convite criado e copiado com segurança."); }} />}
     {modal === "video" && <VideoReview videoId={videoId} onClose={() => setModal(null)} onSave={() => { setModal(null); notify("Revisão técnica salva no prontuário."); }} />}
     {modal === "meet" && <MeetDetail meetId={meetId} onClose={() => setModal(null)} onNotify={notify} />}
     {modal === "command" && <QuickCreate onClose={() => setModal(null)} onSelect={(choice) => { if (choice === "Treino") openWorkout(); else if (choice === "Convite") setModal("invite"); else if (choice === "Vídeo") { setModal(null); go("videos"); } else openManage(choice === "Atleta" ? "athletes" : choice === "Competição" ? "meets" : "goals", true); }} />}
     {modal === "manage" && <ManagementCenter onClose={() => setModal(null)} onNotify={notify} initialKind={manageKind} createOnOpen={createManaged} />}
     {modal === "connection" && <ConnectionDialog initialProvider={connectionProvider} onClose={() => setModal(null)} onSave={notify} />}
-    {toast && <div className="toast"><CircleCheck size={18} />{toast}</div>}
+    {toast && <div className={`toast ${toast.variant === "error" ? "toast-error" : ""}`} role="status">{toast.variant === "error" ? <AlertTriangle size={18} /> : <CircleCheck size={18} />}{toast.message}</div>}
     <AiAssistant />
   </div>;
 }

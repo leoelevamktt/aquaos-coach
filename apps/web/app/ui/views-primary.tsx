@@ -2,14 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  Activity, ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, Calendar, Camera,
+  Activity, ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, Bot, Calendar, Camera,
   ChevronLeft, ChevronRight, CircleCheck, Clock, Download, Dumbbell, FileText,
   Film, Gauge, HeartPulse, Library, MapPin, MessageSquare, Mic, Moon, MoreHorizontal,
   Plus, Search, SlidersHorizontal, Smartphone, Sparkles, Target, Trophy, Upload, UserPlus,
   UserRound, Users, Watch, Waves,
 } from "lucide-react";
-import { athletes, hydrateAthlete, insights, meets as demoMeets, practices, strengthLibrary, workoutLibrary, zoneDistribution, type AthleteProfile } from "./demo-data";
-import { Avatar, formatNumber, Metric, PageTitle, ProgressRing, SectionHead, StatusDot } from "./components";
+import { athletes, hydrateAthlete, practices, strengthLibrary, workoutLibrary, zoneDistribution, type AthleteProfile } from "./demo-data";
+import { Avatar, formatNumber, Metric, ModalShell, PageTitle, ProgressRing, SectionHead, StatusDot } from "./components";
 import { API_URL, apiRequest, importFile } from "./api";
 import { csvRow, downloadFile } from "./client-utils";
 import {
@@ -20,15 +20,26 @@ import { WorkoutTemplateEditor, type WorkoutSeed } from "./workout-library-actio
 
 export type AppView = "today" | "athletes" | "practices" | "seasons" | "videos" | "analytics" | "rkf" | "inbox" | "integrations" | "settings";
 
-export function Today({ onCreate, onNavigate, onAthlete, onNotify, liveVersion = 0 }: { onCreate: () => void; onNavigate: (view: AppView) => void; onAthlete: (id: string) => void; onNotify: (message: string) => void; liveVersion?: number }) {
+export type Briefing = {
+  date: string;
+  nextMeet: { id: string; name: string; priority: string; startsOn: string; daysUntil: number; pool?: string } | null;
+  todaySessions: Array<{ id: string; title: string; date: string; volumeMeters: number; zone: string; blocksCount: number; time: string; targetType: "team" | "group" | "athlete"; targetId: string; prescriptionId?: string }>;
+  metrics: { activeAthletes: number; readyAthletes: number; attentionAthletes: number; averageReadiness: number | null; checkinsToday: number; adherencePercent: number | null; pendingVideos: number; pendingInvitations: number; expiringInvitations: number; prescriptionsAwaitingApproval: number };
+  load: { acute: number | null; chronic: number | null; acwr: number | null; weeklyHistory: Array<{ label: string; volumeMeters: number }>; source: "activities" | "none" };
+  insights: Array<{ id: string; severity: "attention" | "info" | "success"; title: string; detail: string; view?: "athletes" | "videos" | "inbox" | "practices" | "rkf" | "seasons"; athleteId?: string }>;
+  perAthlete: Array<Record<string, unknown>>;
+};
+
+const fmtAcwr = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+export function Today({ onCreate, onAiWorkout, onNavigate, onAthlete, onNotify, liveVersion = 0 }: { onCreate: () => void; onAiWorkout: () => void; onNavigate: (view: AppView) => void; onAthlete: (id: string) => void; onNotify: (message: string) => void; liveVersion?: number }) {
   // Data e saudação ao vivo (cliente, evita mismatch de hidratação)
   const [today, setToday] = useState<{ kicker: string; greeting: string } | null>(null);
   // Atletas reais da API; contagem sempre consistente com a lista exibida
   const [roster, setRoster] = useState<AthleteProfile[] | null>(null);
-  // Próxima competição do calendário (fallback: demo em dev)
-  const [meet, setMeet] = useState<{ name: string; startsOn?: string; pool?: string; priority?: string; qualified?: number; entries?: number } | null>(null);
-  const [videoSummary, setVideoSummary] = useState({ total: 0, pending: 0 });
-
+  // Briefing consolidado do coach (sessões de hoje, métricas, carga e decisões)
+  const [briefing, setBriefing] = useState<Briefing | null>(null);
+  const [briefingReady, setBriefingReady] = useState(false);
   useEffect(() => {
     const now = new Date();
     const weekday = new Intl.DateTimeFormat("pt-BR", { weekday: "long" }).format(now).toUpperCase();
@@ -42,52 +53,50 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify, liveVersion =
         else if (process.env.NODE_ENV !== "production") setRoster(athletes);
       })
       .catch(() => { if (process.env.NODE_ENV !== "production") setRoster(athletes); });
-    void apiRequest<{ data: Array<Record<string, unknown>> }>("/api/v1/manage/meets")
-      .then((response) => {
-        const upcoming = (response.data ?? [])
-          .filter((record) => !record.startsOn || String(record.startsOn) >= new Date().toISOString().slice(0, 10))
-          .sort((a, b) => String(a.startsOn ?? "").localeCompare(String(b.startsOn ?? "")))[0];
-        if (upcoming) setMeet({ name: String(upcoming.name ?? "Competição"), startsOn: String(upcoming.startsOn ?? ""), pool: String(upcoming.pool ?? "50 m"), priority: String(upcoming.priority ?? "A"), qualified: upcoming.qualified == null ? undefined : Number(upcoming.qualified), entries: upcoming.entries == null ? undefined : Number(upcoming.entries) });
-        else setMeet({ name: demoMeets[0].name, startsOn: new Date(Date.now() + demoMeets[0].days * 86_400_000).toISOString().slice(0, 10), pool: `${demoMeets[0].location} · Piscina ${demoMeets[0].pool}`, priority: demoMeets[0].priority, qualified: demoMeets[0].qualified, entries: demoMeets[0].entries });
-      })
-      .catch(() => setMeet({ name: demoMeets[0].name, startsOn: new Date(Date.now() + demoMeets[0].days * 86_400_000).toISOString().slice(0, 10), pool: `${demoMeets[0].location} · Piscina ${demoMeets[0].pool}`, priority: demoMeets[0].priority, qualified: demoMeets[0].qualified, entries: demoMeets[0].entries }));
-    void apiRequest<{ data: Array<Record<string, unknown>> }>("/api/v1/manage/videos")
-      .then((response) => setVideoSummary({ total: response.data.length, pending: response.data.filter((video) => String(video.status ?? "").toLowerCase() !== "reviewed").length }))
-      .catch(() => setVideoSummary({ total: 0, pending: 0 }));
+    void apiRequest<Briefing>("/api/v1/coach/briefing")
+      .then((payload) => { setBriefing(payload); setBriefingReady(true); })
+      .catch(() => { setBriefing(null); setBriefingReady(true); });
   }, [liveVersion]);
 
   const displayAthletes = roster ?? [];
   const visibleCount = Math.min(displayAthletes.length, 4);
   const hiddenCount = Math.max(0, displayAthletes.length - visibleCount);
-  const daysToMeet = meet?.startsOn ? Math.max(0, Math.round((new Date(meet.startsOn).getTime() - Date.now()) / 86_400_000)) : null;
-  const weeklyVolumeM = displayAthletes.reduce((sum, athlete) => sum + athlete.weeklyDistance, 0);
+  const meet = briefing?.nextMeet ?? null;
+  const sessions = briefing?.todaySessions ?? [];
+  const sessionVolumeM = sessions.reduce((sum, session) => sum + (Number(session.volumeMeters) || 0), 0);
+  const loadHistory = briefing?.load.weeklyHistory ?? [];
+  const maxHistoryVolume = Math.max(1, ...loadHistory.map((item) => item.volumeMeters || 0));
+  const metrics = briefing?.metrics;
   const readinessValues = displayAthletes.flatMap((athlete) => typeof athlete.readiness === "number" ? [athlete.readiness] : []);
-  const readinessAverage = readinessValues.length ? Math.round(readinessValues.reduce((sum, value) => sum + value, 0) / readinessValues.length) : null;
-  const readyCount = readinessValues.filter((value) => value >= 70).length;
-  const attentionCount = readinessValues.filter((value) => value < 70).length;
-  const attendanceAverage = displayAthletes.length ? Math.round(displayAthletes.reduce((sum, athlete) => sum + athlete.attendance, 0) / displayAthletes.length) : null;
+  const averageReadiness = briefing ? briefing.metrics.averageReadiness : readinessValues.length ? Math.round(readinessValues.reduce((sum, value) => sum + value, 0) / readinessValues.length) : null;
+  const readyCount = briefing ? briefing.metrics.readyAthletes : readinessValues.filter((value) => value >= 70).length;
+  const attentionCount = briefing ? briefing.metrics.attentionAthletes : readinessValues.filter((value) => value < 70).length;
+  const activeCount = metrics ? metrics.activeAthletes : (displayAthletes.length || null);
+  const adherencePercent = briefing ? briefing.metrics.adherencePercent : (displayAthletes.length ? Math.round(displayAthletes.reduce((sum, athlete) => sum + athlete.attendance, 0) / displayAthletes.length) : null);
+  const weeklyVolumeM = displayAthletes.reduce((sum, athlete) => sum + athlete.weeklyDistance, 0);
+  const sessionSubtitle = !briefingReady ? "Carregando sessões…" : sessions.length ? `${sessions.length} ${sessions.length === 1 ? "sessão" : "sessões"} · ${formatNumber(sessionVolumeM)} m · ${sessions[0].zone}` : "Nada publicado para hoje";
 
   const exportDailyReport = () => {
-    const rows = [csvRow(["Indicador", "Valor"]), csvRow(["Atletas ativos", displayAthletes.length]), csvRow(["Volume semanal", `${(weeklyVolumeM / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km`]), csvRow(["Readiness médio", readinessAverage ?? "sem dados"]), csvRow(["Presença", attendanceAverage == null ? "sem dados" : `${attendanceAverage}%`]), csvRow(["Provas filmadas", videoSummary.total])];
+    const rows = [csvRow(["Indicador", "Valor"]), csvRow(["Atletas ativos", activeCount ?? "sem dados"]), csvRow(["Volume semanal", `${(weeklyVolumeM / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km`]), csvRow(["Readiness médio", averageReadiness ?? "sem dados"]), csvRow(["Aderência", adherencePercent == null ? "sem dados" : `${adherencePercent}%`]), csvRow(["Check-ins hoje", metrics?.checkinsToday ?? 0]), csvRow(["Vídeos pendentes", metrics?.pendingVideos ?? 0])];
     downloadFile(`relatorio-operacional-${new Date().toISOString().slice(0, 10)}.csv`, rows.join("\n"));
     onNotify("Relatório operacional exportado em CSV.");
   };
   return <>
-    <PageTitle kicker={today?.kicker ?? "CARREGANDO…"} title={today?.greeting ?? "Bom dia, Leonardo."} subtitle="A equipe está estável. Há duas decisões importantes antes da sessão da tarde.">
+    <PageTitle kicker={today?.kicker ?? "CARREGANDO…"} title={today?.greeting ?? "Bom dia, Leonardo."} subtitle={briefing?.insights.length ? `${briefing.insights.length} decisão(ões) priorizadas para a sessão de hoje.` : "Tudo em ordem para a sessão de hoje."}>
       <button className="secondary-button" onClick={exportDailyReport}><Download size={17} />Relatório</button><button className="primary-button" onClick={onCreate}><Plus size={17} />Novo treino</button>
     </PageTitle>
     <section className="hero-grid">
       {meet && <article className="next-meet-card">
         <div className="meet-top"><span className="priority">PRIORIDADE {meet.priority}</span><Trophy size={18} /></div>
         <div><span>PRÓXIMA COMPETIÇÃO</span><h2>{meet.name}</h2><p><MapPin size={14} />{meet.pool ?? "Piscina 50 m"}</p></div>
-        <div className="meet-countdown"><strong>{daysToMeet ?? "—"}</strong><span>dias</span><div><b>{meet.qualified ?? "—"}</b> atletas com índice<br /><b>{meet.entries ?? "—"}</b> provas inscritas</div></div>
+        <div className="meet-countdown"><strong>{meet.daysUntil}</strong><span>dias</span><div><b>{meet.pool ?? "Piscina 50 m"}</b><br />calendário da temporada</div></div>
         <button onClick={() => onNavigate("seasons")}>Abrir competição <ArrowRight size={16} /></button>
       </article>}
       <div className="metric-grid">
-        <Metric label="ATLETAS ATIVOS" value={displayAthletes.length ? String(displayAthletes.length) : "—"} detail={displayAthletes.length ? `${displayAthletes.length} no plantel` : "carregando"} icon={Users} />
-        <Metric label="READINESS MÉDIO" value={readinessAverage == null ? "—" : `${readinessAverage} / 100`} detail={`${readyCount} prontos · ${attentionCount} em atenção`} icon={Gauge} tone="violet" />
-        <Metric label="PRESENÇA" value={attendanceAverage == null ? "—" : `${attendanceAverage}%`} detail="Média do plantel ativo" icon={CircleCheck} tone="blue" />
-        <Metric label="PROVAS FILMADAS" value={String(videoSummary.total)} detail={`${videoSummary.pending} aguardam revisão`} icon={Film} tone="orange" />
+        <Metric label="ATLETAS ATIVOS" value={activeCount == null ? "—" : String(activeCount)} detail={activeCount == null ? "carregando" : `${activeCount} no plantel`} icon={Users} />
+        <Metric label="READINESS MÉDIO" value={averageReadiness == null ? "—" : `${averageReadiness} / 100`} detail={briefing ? `${readyCount} prontos · ${attentionCount} em atenção` : "carregando"} icon={Gauge} tone="violet" />
+        <Metric label="ADERÊNCIA" value={adherencePercent == null ? "—" : `${adherencePercent}%`} detail={briefing ? `${metrics?.checkinsToday ?? 0} check-ins hoje` : "carregando"} icon={CircleCheck} tone="blue" />
+        <Metric label="VÍDEOS PENDENTES" value={metrics ? String(metrics.pendingVideos) : "—"} detail={briefing ? `${metrics?.pendingInvitations ?? 0} convites aguardando ativação` : "carregando"} icon={Film} tone="orange" />
       </div>
     </section>
     <section className="today-layout">
@@ -98,27 +107,35 @@ export function Today({ onCreate, onNavigate, onAthlete, onNotify, liveVersion =
             <button onClick={onCreate}><span className="option-icon aqua"><MessageSquare size={20} /></span><div><strong>Escrever ou ditar treino</strong><small>Texto livre, voz, foto ou documento</small></div><ArrowRight size={17} /></button>
             <button onClick={() => onNavigate("practices")}><span className="option-icon violet"><Library size={20} /></span><div><strong>Usar a biblioteca</strong><small>Treinos de natação e força</small></div><ArrowRight size={17} /></button>
             <button onClick={onCreate}><span className="option-icon coral"><Sparkles size={20} /></span><div><strong>Criar com o assistente</strong><small>Objetivo, carga e grupo como contexto</small></div><ArrowRight size={17} /></button>
+            <button onClick={onAiWorkout}><span className="option-icon violet"><Bot size={20} /></span><div><strong>Gerar treino com IA</strong><small>Readiness, carga e zona combinados</small></div><ArrowRight size={17} /></button>
           </div>
         </article>
         <article className="card">
-          <SectionHead title="Na água hoje" subtitle={`${displayAthletes.length || "…"} atletas · 5.200 m · AN2`} action="Ver sessão" onAction={() => onNavigate("practices")} />
-          <div className="session-strip"><div className="session-time"><Clock size={15} /><b>07:30</b></div><div><strong>Ritmo de prova · 200 Livre</strong><small>3 blocos · 1h42 estimados · Piscina olímpica</small></div><span className="zone-tag an2">AN2</span></div>
-          <div className="water-list">
-            {displayAthletes.slice(0, visibleCount).map((athlete) => <button key={athlete.id} onClick={() => onAthlete(athlete.id)}><Avatar initials={athlete.initials} color={athlete.color} small /><span><b>{athlete.name}</b><small>{athlete.group}</small></span><em>{formatNumber(athlete.weeklyDistance)} m</em><ProgressRing value={athlete.readiness ?? 0} size="small" /></button>)}
-            {hiddenCount > 0 && <button className="water-more" onClick={() => onNavigate("athletes")}><span className="water-more-chip">+{hiddenCount} atletas</span><span>ver plantel completo</span><ArrowRight size={15} /></button>}
-          </div>
+          <SectionHead title="Na água hoje" subtitle={sessionSubtitle} action="Ver semana" onAction={() => onNavigate("practices")} />
+          {!briefingReady ? <div className="water-loading"><span className="skeleton-line" /><span className="skeleton-line" /><span className="skeleton-line" /></div>
+           : !sessions.length ? <div className="empty-state compact"><Waves size={26} /><strong>Nenhuma sessão publicada para hoje</strong><p>Publique uma sessão no calendário ou gere sugestões com o engine RKF.</p><button className="primary-button" onClick={onAiWorkout}><Sparkles size={15} />Gerar com IA</button></div>
+           : <><div className="session-list">{sessions.map((session) => <div className="session-strip" key={session.id}><div className="session-time"><Clock size={15} /><b>{session.time}</b></div><div><strong>{session.title}</strong><small>{session.blocksCount} blocos · {formatNumber(session.volumeMeters)} m · {session.targetType === "team" ? "Equipe inteira" : session.targetType === "group" ? "Grupo" : "Atleta"}</small></div><span className={`zone-tag ${session.zone.toLowerCase()}`}>{session.zone}</span></div>)}</div>
+             <div className="water-list">
+               {displayAthletes.slice(0, visibleCount).map((athlete) => <button key={athlete.id} onClick={() => onAthlete(athlete.id)}><Avatar initials={athlete.initials} color={athlete.color} small /><span><b>{athlete.name}</b><small>{athlete.group}</small></span><em>{formatNumber(athlete.weeklyDistance)} m</em><ProgressRing value={athlete.readiness ?? 0} size="small" /></button>)}
+               {hiddenCount > 0 && <button className="water-more" onClick={() => onNavigate("athletes")}><span className="water-more-chip">+{hiddenCount} atletas</span><span>ver plantel completo</span><ArrowRight size={15} /></button>}
+             </div></>}
         </article>
       </div>
       <aside className="stack">
         <article className="card attention-card">
-          <SectionHead title="Para decidir" subtitle="Priorizado pelo impacto" action="Ver tudo" onAction={() => onNavigate("inbox")} />
-          {insights.slice(0, 3).map((item) => <button className="insight-row" key={item.id} onClick={() => item.target === "videos" ? onNavigate("videos") : onAthlete(item.target)}><span className={`insight-icon ${item.type}`}>{item.type === "critical" ? <HeartPulse size={17} /> : item.type === "video" ? <Film size={17} /> : <Activity size={17} />}</span><span><b>{item.title}</b><small>{item.body}</small></span><ArrowRight size={15} /></button>)}
+          <SectionHead title="Para decidir" subtitle={briefing?.insights.length ? "Priorizado pelo impacto" : "Nada urgente no radar"} action="Ver tudo" onAction={() => onNavigate("inbox")} />
+          {!briefingReady ? <div className="water-loading"><span className="skeleton-line" /><span className="skeleton-line mid" /></div>
+           : briefing?.insights.length ? briefing.insights.slice(0, 3).map((item) => <button className="insight-row" key={item.id} onClick={() => item.view ? onNavigate(item.view as AppView) : item.athleteId ? onAthlete(item.athleteId) : onNavigate("inbox")}><span className={`insight-icon ${item.severity}`}>{item.severity === "attention" ? <HeartPulse size={17} /> : item.severity === "success" ? <CircleCheck size={17} /> : <Activity size={17} />}</span><span><b>{item.title}</b><small>{item.detail}</small></span><ArrowRight size={15} /></button>)
+           : <div className="empty-state compact"><CircleCheck size={24} /><strong>Tudo em ordem</strong><p>Nenhuma decisão pendente para a sessão de hoje.</p></div>}
         </article>
         <article className="card load-card">
           <SectionHead title="Carga da equipe" subtitle="Últimas 8 semanas" action="Analisar" onAction={() => onNavigate("analytics")} />
-          <div className="mini-bars">{[42, 56, 51, 68, 72, 65, 81, 76].map((height, index) => <span key={index} style={{ height: `${height}%` }} className={index === 7 ? "current" : ""} />)}</div>
-          <div className="load-summary"><div><small>AGUDA</small><b>538</b></div><div><small>CRÔNICA</small><b>504</b></div><div><small>ACWR</small><b>1,07</b></div></div>
-          <p className="demo-caption"><Sparkles size={13} />RkfLoadEngine V5.1 com dados sintéticos de validação.</p>
+          {!briefingReady ? <div className="water-loading"><span className="skeleton-line wide" /><span className="skeleton-line" /><span className="skeleton-line short" /></div>
+           : briefing?.load.source === "activities" && loadHistory.length ? <>
+             <div className="mini-bars">{loadHistory.map((item, index) => <span key={item.label ?? index} style={{ height: `${Math.max(6, Math.round(((item.volumeMeters || 0) / maxHistoryVolume) * 100))}%` }} className={index === loadHistory.length - 1 ? "current" : ""} title={`${item.label}: ${formatNumber(item.volumeMeters)} m`} />)}</div>
+             <div className="load-summary"><div><small>AGUDA</small><b>{briefing.load.acute == null ? "—" : formatNumber(Math.round(briefing.load.acute))}</b></div><div><small>CRÔNICA</small><b>{briefing.load.chronic == null ? "—" : formatNumber(Math.round(briefing.load.chronic))}</b></div><div><small>ACWR</small><b>{fmtAcwr(briefing.load.acwr)}</b></div></div>
+             <p className="demo-caption"><Sparkles size={13} />Carga calculada a partir das execuções registradas.</p>
+           </> : <div className="empty-state compact"><Activity size={26} /><strong>Sem execuções registradas ainda</strong><p>A carga aguda, crônica e o ACWR aparecem quando as execuções da equipe forem registradas.</p></div>}
         </article>
       </aside>
     </section>
@@ -157,7 +174,7 @@ export function Team({ onInvite, onAthlete, onNotify, liveVersion = 0 }: { onInv
         <span className="athlete-person"><Avatar initials={athlete.initials} color={athlete.color} /><span><b>{athlete.name}</b><small>{athlete.handle} · {athlete.group}</small></span>{athlete.account !== "active" && <i>{athlete.account === "invited" ? "Convite pendente" : "Sem conta"}</i>}</span>
         <span>{athlete.goalEvent ? <><b>{athlete.goalEvent}</b><small>{athlete.bestTime} → {athlete.goalTime}</small></> : <><b className="muted">Sem meta</b><small>Cadastre um objetivo</small></>}</span>
         <span>{athlete.readiness ? <><ProgressRing value={athlete.readiness} size="small" /><small>{athlete.lastBodySync}</small></> : <><StatusDot tone="muted" /><small>Sem wearable</small></>}</span>
-        <span><b>{formatNumber(athlete.weeklyDistance)} m</b><small className={athlete.weeklyDistance >= athlete.previousDistance ? "positive" : "negative"}>{athlete.weeklyDistance >= athlete.previousDistance ? "↑" : "↓"} {Math.abs(Math.round((athlete.weeklyDistance / athlete.previousDistance - 1) * 100))}%</small></span>
+        <span><b>{formatNumber(athlete.weeklyDistance)} m</b>{athlete.previousDistance > 0 ? <small className={athlete.weeklyDistance >= athlete.previousDistance ? "positive" : "negative"}>{athlete.weeklyDistance >= athlete.previousDistance ? "↑" : "↓"} {Math.abs(Math.round((athlete.weeklyDistance / athlete.previousDistance - 1) * 100))}%</small> : <small>Sem histórico</small>}</span>
         <span><b>{athlete.attendance}%</b><span className="inline-progress"><i style={{ width: `${athlete.attendance}%` }} /></span></span><ArrowRight size={16} />
       </button>)}</div>
     </section>
@@ -180,7 +197,41 @@ export function AthleteDetail({ athlete, onBack, onCreate, onNavigate, onNotify 
         });
       }).catch(() => undefined);
   }, [athlete.id]);
+  // Volume executado e zonas vêm de dados sincronizados: snapshots de carga + atividades
+  const [weeklyVolume, setWeeklyVolume] = useState<Array<{ label: string; meters: number }> | null>(null);
+  const [zoneShares, setZoneShares] = useState<Array<{ code: string; percent: number; color: string }> | null>(null);
+  const [trendPoints, setTrendPoints] = useState<number | null>(null);
+  useEffect(() => {
+    setWeeklyVolume(null); setZoneShares(null); setTrendPoints(null);
+    const mondayOf = (iso: string) => { if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return ""; const date = new Date(`${iso}T12:00:00Z`); if (Number.isNaN(date.getTime())) return ""; const monday = new Date(date); monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7)); return monday.toISOString().slice(0, 10); };
+    const weekly = new Map<string, number>();
+    const zoneTotals = new Map<string, number>();
+    const add = (iso: string, meters: number, zone?: string) => { if (!(meters > 0)) return; const key = mondayOf(iso); if (!key) return; weekly.set(key, (weekly.get(key) ?? 0) + meters); if (zone) zoneTotals.set(zone, (zoneTotals.get(zone) ?? 0) + meters); };
+    const publish = () => {
+      const monday = new Date(); monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+      const weeks = Array.from({ length: 8 }, (_, index) => { const start = new Date(Date.UTC(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate(), 12)); start.setUTCDate(start.getUTCDate() - (7 - index) * 7); return { label: `S${index + 1}`, meters: weekly.get(start.toISOString().slice(0, 10)) ?? 0 }; });
+      setWeeklyVolume(weeks.some((week) => week.meters > 0) ? weeks : null);
+      const total = [...zoneTotals.values()].reduce((sum, value) => sum + value, 0);
+      setZoneShares(total > 0 ? [...zoneTotals.entries()].sort((a, b) => b[1] - a[1]).map(([code, meters]) => ({ code, percent: Math.round((meters / total) * 100), color: zoneDistribution.find((zone) => zone.code === code.toUpperCase())?.color ?? "#397ac4" })) : null);
+    };
+    void apiRequest<{ snapshots?: Array<Record<string, unknown>> }>(`/api/v1/rkf/athletes/${athlete.id}/load-layers`)
+      .then((response) => {
+        (response.snapshots ?? []).forEach((snapshot) => { const layers = snapshot.layers as { executed?: { volumeM?: unknown } } | undefined; add(String(snapshot.date ?? ""), Number(layers?.executed?.volumeM ?? snapshot.executedVolumeM ?? 0)); });
+        publish();
+      })
+      .catch(() => undefined);
+    void apiRequest<{ data: Array<Record<string, unknown>> }>("/api/v1/manage/activities")
+      .then((response) => {
+        (response.data ?? []).filter((item) => item.athleteId === athlete.id).forEach((item) => add(String(item.date ?? ""), Number(item.executedVolumeM ?? item.distanceMeters ?? 0), item.zone ? String(item.zone) : undefined));
+        publish();
+      })
+      .catch(() => undefined);
+    void apiRequest<{ dataPoints: number }>(`/api/v1/rkf/athletes/${athlete.id}/performance-trend`)
+      .then((response) => setTrendPoints(response.dataPoints ?? 0))
+      .catch(() => setTrendPoints(null));
+  }, [athlete.id]);
   const pacing = calculateGoalPacing(athlete, goal);
+  const volumeMax = Math.max(1, ...(weeklyVolume ?? []).map((week) => week.meters));
   const exportPerformance = () => {
     exportAthletePerformance(athlete, goal);
     onNotify("Volume e intensidade exportados em CSV.");
@@ -216,7 +267,11 @@ export function AthleteDetail({ athlete, onBack, onCreate, onNavigate, onNotify 
           <div className="skill-grid">{athlete.skills.map((skill) => <div className="skill-card" key={skill.key}><div><span>{skill.key}</span><small>{skill.label}</small></div><strong>{skill.score}</strong><span className={skill.trend >= 0 ? "positive" : "negative"}>{skill.trend >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}{Math.abs(skill.trend)}</span><div className="skill-bar"><i style={{ width: `${skill.score}%` }} /></div></div>)}</div>
           <div className="supporting-proof"><Sparkles size={18} /><div><span>O QUE SUSTENTA O NÍVEL</span><b>Ritmo sustentado nos últimos 3 x 100 da prova</b><small>Vídeo de 23 ago + treino AN2 de 25 ago | consistência alta</small></div><button className="text-button" onClick={() => setPanel("evidence")}>Ver evidências <ArrowRight size={15} /></button></div>
         </article>
-        <article className="card volume-panel"><SectionHead title="Volume e intensidade" subtitle="Últimas 8 semanas" action="Exportar CSV" onAction={exportPerformance} /><div className="volume-chart">{[52, 66, 61, 72, 78, 69, 86, 81].map((height, index) => <div key={index}><span style={{ height: `${height}%` }} className={index === 7 ? "current" : ""} /><small>S{index + 1}</small></div>)}</div><div className="zone-stack">{zoneDistribution.map((zone) => <span key={zone.code} style={{ width: `${zone.percent}%`, background: zone.color }} title={`${zone.code}: ${zone.percent}%`} />)}</div><div className="zone-legend">{zoneDistribution.map((zone) => <span key={zone.code}><i style={{ background: zone.color }} />{zone.code} {zone.percent}%</span>)}</div><div className="export-footnote"><Download size={14} /><span>O arquivo inclui prescrito, realizado, aderência e metros por zona.</span><button className="text-button" onClick={exportPdf}><FileText size={14} />Relatório PDF</button></div></article>
+        <article className="card volume-panel"><SectionHead title="Volume e intensidade" subtitle={weeklyVolume ? (trendPoints ? `Últimas 8 semanas · ${trendPoints} resultados sincronizados` : "Últimas 8 semanas · execuções sincronizadas") : "Sem dados sincronizados"} action="Exportar CSV" onAction={exportPerformance} />
+          {weeklyVolume ? <div className="volume-chart">{weeklyVolume.map((week, index) => <div key={week.label}><span style={{ height: `${Math.max(6, Math.round((week.meters / volumeMax) * 100))}%` }} className={index === weeklyVolume.length - 1 ? "current" : ""} title={`${week.label}: ${formatNumber(week.meters)} m`} /><small>{week.label}</small></div>)}</div>
+           : <div className="empty-state compact"><Activity size={26} /><strong>Sem dados sincronizados</strong><p>Os volumes semanais aparecem quando execuções ou snapshots de carga forem sincronizados para este atleta.</p></div>}
+          {zoneShares ? <><div className="zone-stack">{zoneShares.map((zone) => <span key={zone.code} style={{ width: `${zone.percent}%`, background: zone.color }} title={`${zone.code}: ${zone.percent}%`} />)}</div><div className="zone-legend">{zoneShares.map((zone) => <span key={zone.code}><i style={{ background: zone.color }} />{zone.code} {zone.percent}%</span>)}</div></> : <p className="demo-caption"><Sparkles size={13} />Distribuição por zona disponível quando atividades com zona forem sincronizadas.</p>}
+          <div className="export-footnote"><Download size={14} /><span>O arquivo inclui prescrito, realizado, aderência e metros por zona.</span><button className="text-button" onClick={exportPdf}><FileText size={14} />Relatório PDF</button></div></article>
       </div>
       <aside className="stack">
         <article className="card body-card"><SectionHead title="Corpo e prontidão" subtitle={athlete.lastBodySync ?? "Sem sincronização"} action="Detalhes" onAction={() => setPanel("body")} />{athlete.readiness ? <><div className="body-overview"><ProgressRing value={athlete.readiness} label="PRONTO" size="large" /><div><span><Moon size={16} /><small>SONO</small><b>{athlete.sleep} h</b></span><span><HeartPulse size={16} /><small>RECUPERAÇÃO</small><b>{athlete.recovery}%</b></span></div></div><div className="body-grid"><div><small>HRV</small><b>{athlete.hrv} ms</b><span className="positive">↑ 4%</span></div><div><small>FCR</small><b>{athlete.restingHr} bpm</b><span>estável</span></div><div><small>SNC</small><b>Bom</b><span>sem alerta</span></div><div><small>MOTOR</small><b>92%</b><span className="positive">ótimo</span></div></div></> : <div className="empty-state compact"><Watch size={26} /><strong>Sem dados de corpo</strong><p>Conecte um wearable para sono, HRV e recuperação.</p><button className="secondary-button" onClick={() => onNavigate("integrations")}>Conectar dispositivo</button></div>}</article>
@@ -242,7 +297,7 @@ export function Practices({ onCreate, onNotify, refreshToken = 0 }: { onCreate: 
   const [libraryRefresh, setLibraryRefresh] = useState(0);
   useEffect(() => {
     apiRequest<{ data: PublishedWorkoutRecord[] }>("/api/v1/manage/workouts")
-      .then((response) => { setPublished(response.data.filter((item) => item.source === "coach-publish")); setLibraryRecords(response.data.filter((item) => item.source === "library")); })
+      .then((response) => { setPublished(response.data.filter((item) => item.source !== "library")); setLibraryRecords(response.data.filter((item) => item.source === "library")); })
       .catch(() => { setPublished([]); setLibraryRecords([]); });
   }, [refreshToken, libraryRefresh]);
   return <>
@@ -255,30 +310,10 @@ export function Practices({ onCreate, onNotify, refreshToken = 0 }: { onCreate: 
   </>;
 }
 
-function LegacyWeekCalendar({ onCreate, published }: { onCreate: (seed?: WorkoutSeed) => void; published: PublishedWorkoutRecord[] }) {
-  const [weekOffset, setWeekOffset] = useState(0);
-  const currentDate = new Date();
-  const monday = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth(), currentDate.getUTCDate(), 12));
-  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7) + weekOffset * 7);
-  const base = monday.getTime();
-  const todayIso = currentDate.toISOString().slice(0, 10);
-  const names = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"];
-  const months = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
-  const dates = Array.from({ length: 7 }, (_, index) => new Date(base + index * 86_400_000));
-  const days = dates.map((date) => {
-    const iso = date.toISOString().slice(0, 10);
-    const synced = published.filter((record) => record.date === iso).map((record) => ({ id: record.id, date: iso, day: names[date.getUTCDay()], title: record.title ?? "Treino publicado", distance: Number(record.distanceMeters ?? 0), zone: record.zone ?? "A1", type: (record.kind === "strength" ? "strength" : "swim") as "strength" | "swim", time: record.scheduledAt?.slice(11, 16) ?? "08:00", status: "published" as const, group: record.target ?? "Equipe inteira", rpe: 6 }));
-    const sessions = [...practices.filter((practice) => practice.date === iso), ...synced];
-    return { iso, day: names[date.getUTCDay()], date: String(date.getUTCDate()).padStart(2, "0"), load: Math.round(sessions.reduce((sum, session) => sum + session.distance, 0) / 8), sessions };
-  });
-  const first = dates[0]; const last = dates[6];
-  const weekLabel = `${String(first.getUTCDate()).padStart(2, "0")} ${first.getUTCMonth() !== last.getUTCMonth() ? `de ${months[first.getUTCMonth()]} ` : ""}- ${String(last.getUTCDate()).padStart(2, "0")} de ${months[last.getUTCMonth()]} de ${last.getUTCFullYear()}`;
-  const totalLoad = days.reduce((sum, day) => sum + day.load, 0);
-  return <section className="card calendar-card"><div className="calendar-toolbar"><div><button className="icon-button" aria-label="Semana anterior" onClick={() => setWeekOffset((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Próxima semana" onClick={() => setWeekOffset((value) => value + 1)}><ChevronRight size={18} /></button><button className="secondary-button small" onClick={() => setWeekOffset(0)}>Esta semana</button></div><strong>{weekLabel}</strong><div className="week-load"><Sparkles size={15} />Carga prevista <b>{formatNumber(totalLoad)}</b></div></div><div className="week-grid">{days.map((item) => <div className={`day-column ${item.iso === "2026-08-29" ? "today" : ""}`} key={item.iso}><div className="day-head"><span>{item.day}</span><b>{item.date}</b><small>{item.load ? `${item.load} u.a.` : "Descanso"}</small></div><div className="day-content">{item.sessions.length ? item.sessions.map((practice) => <button className={`practice-card ${practice.type}`} key={practice.id} onClick={() => onCreate({ title: practice.title, prompt: `${practice.title}\n${practice.distance ? `${practice.distance} m` : "Sessão de força"}\n${practice.group}`, distanceMeters: practice.distance, zone: practice.zone, kind: practice.type === "strength" ? "strength" : "swim" })}><span><i />{practice.time}</span><strong>{practice.title}</strong><small>{practice.distance ? `${formatNumber(practice.distance)} m` : "55 min"} · {practice.group}</small><div><span className={`zone-tag ${practice.zone.toLowerCase()}`}>{practice.zone}</span><em>{practice.status === "published" ? <><CircleCheck size={12} />Publicado</> : "Rascunho"}</em></div></button>) : <button className="empty-day" onClick={() => onCreate()}><Plus size={17} />Planejar o dia</button>}</div></div>)}</div><div className="calendar-footer"><div><span><i className="swim-dot" />Natação</span><span><i className="strength-dot" />Força</span><span><i className="draft-dot" />Rascunho</span></div><p><Sparkles size={14} />Carga calculada pelo RkfLoadEngine V5.1</p></div></section>;
-}
 
 function WeekCalendar({ onCreate, published }: { onCreate: (seed?: WorkoutSeed) => void; published: PublishedWorkoutRecord[] }) {
   const [weekOffset, setWeekOffset] = useState(0);
+  const [detail, setDetail] = useState<PublishedWorkoutRecord | null>(null);
   const current = new Date();
   const monday = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate(), 12));
   monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7) + weekOffset * 7);
@@ -288,18 +323,29 @@ function WeekCalendar({ onCreate, published }: { onCreate: (seed?: WorkoutSeed) 
   const days = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(monday.getTime() + index * 86_400_000);
     const iso = date.toISOString().slice(0, 10);
-    const synced = published.filter((record) => record.date === iso).map((record) => ({ id: record.id, title: record.title ?? "Treino publicado", distance: Number(record.distanceMeters ?? 0), zone: record.zone ?? "A1", type: record.kind === "strength" ? "strength" as const : "swim" as const, time: record.scheduledAt?.slice(11, 16) ?? "08:00", status: "published" as const, group: record.target ?? "Equipe inteira" }));
-    const sessions = [...practices.filter((practice) => practice.date === iso).map((practice) => ({ id: practice.id, title: practice.title, distance: practice.distance, zone: practice.zone, type: practice.type === "strength" ? "strength" as const : "swim" as const, time: practice.time, status: practice.status as "published" | "draft", group: practice.group })), ...synced];
+    const sessions = published.filter((record) => record.date === iso).map((record) => ({ id: record.id, title: record.title ?? "Treino publicado", distance: Number(record.distanceMeters ?? 0), zone: record.zone ?? "A1", type: record.kind === "strength" ? "strength" as const : "swim" as const, time: record.scheduledAt?.slice(11, 16) ?? "08:00", status: "published" as const, group: record.target ?? "Equipe inteira", record }));
     return { iso, day: names[date.getUTCDay()], date: String(date.getUTCDate()).padStart(2, "0"), month: monthNames[date.getUTCMonth()], sessions, load: Math.round(sessions.reduce((sum, session) => sum + session.distance, 0) / 8) };
   });
   const first = days[0]; const last = days[6];
   const weekLabel = `${first.date} ${first.month === last.month ? "" : `de ${first.month} `}- ${last.date} de ${last.month} de ${new Date(monday).getUTCFullYear()}`;
   const totalLoad = days.reduce((sum, day) => sum + day.load, 0);
-  return <section className="card calendar-card">
-    <div className="calendar-toolbar"><div><button className="icon-button" aria-label="Semana anterior" onClick={() => setWeekOffset((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Próxima semana" onClick={() => setWeekOffset((value) => value + 1)}><ChevronRight size={18} /></button><button className="secondary-button small" onClick={() => setWeekOffset(0)}>Esta semana</button></div><strong>{weekLabel}</strong><div className="week-load"><Sparkles size={15} />Carga prevista <b>{formatNumber(totalLoad)}</b></div></div>
-    <div className="week-grid">{days.map((day) => <div className={`day-column ${day.iso === todayIso ? "today" : ""}`} key={day.iso}><div className="day-head"><span>{day.day}</span><b>{day.date}</b><small>{day.load ? `${day.load} u.a.` : "Descanso"}</small></div><div className="day-content">{day.sessions.length ? day.sessions.map((session) => <button className={`practice-card ${session.type}`} key={session.id} onClick={() => onCreate({ id: session.id, title: session.title, prompt: `${session.title}\n${session.distance ? `${session.distance} m` : "Sessão de força"}\n${session.group}`, distanceMeters: session.distance, zone: session.zone, kind: session.type })}><span><i />{session.time}</span><strong>{session.title}</strong><small>{session.distance ? `${formatNumber(session.distance)} m` : "55 min"} · {session.group}</small><div><span className={`zone-tag ${session.zone.toLowerCase()}`}>{session.zone}</span><em>{session.status === "published" ? <><CircleCheck size={12} />Publicado</> : "Rascunho"}</em></div></button>) : <button className="empty-day" onClick={() => onCreate()}><Plus size={17} />Planejar o dia</button>}</div></div>)}</div>
-    <div className="calendar-footer"><div><span><i className="swim-dot" />Natação</span><span><i className="strength-dot" />Força</span><span><i className="draft-dot" />Rascunho</span></div><p><Sparkles size={13} />Cargas estimadas pelo RkfLoadEngine</p></div>
-  </section>;
+  const weekSessions = days.reduce((sum, day) => sum + day.sessions.length, 0);
+  const detailBlocks = detail ? (detail.blocks ?? detail.prescriptionText?.split("\n").filter(Boolean) ?? []) : [];
+  return <>
+    <section className="card calendar-card">
+      <div className="calendar-toolbar"><div><button className="icon-button" aria-label="Semana anterior" onClick={() => setWeekOffset((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Próxima semana" onClick={() => setWeekOffset((value) => value + 1)}><ChevronRight size={18} /></button><button className="secondary-button small" onClick={() => setWeekOffset(0)}>Esta semana</button></div><strong>{weekLabel}</strong><div className="week-load"><Sparkles size={15} />Carga prevista <b>{formatNumber(totalLoad)}</b></div></div>
+      {weekSessions ? <div className="week-grid">{days.map((day) => <div className={`day-column ${day.iso === todayIso ? "today" : ""}`} key={day.iso}><div className="day-head"><span>{day.day}</span><b>{day.date}</b><small>{day.load ? `${day.load} u.a.` : "Descanso"}</small></div><div className="day-content">{day.sessions.length ? day.sessions.map((session) => <button className={`practice-card ${session.type}`} key={session.id} onClick={() => setDetail(session.record ?? null)}><span><i />{session.time}</span><strong>{session.title}</strong><small>{session.distance ? `${formatNumber(session.distance)} m` : "55 min"} · {session.group}</small><div><span className={`zone-tag ${session.zone.toLowerCase()}`}>{session.zone}</span><em>{session.status === "published" ? <><CircleCheck size={12} />Publicado</> : "Rascunho"}</em></div></button>) : <button className="empty-day" onClick={() => onCreate()}><Plus size={17} />Planejar o dia</button>}</div></div>)}</div>
+       : <div className="empty-state compact"><Calendar size={26} /><strong>Sem sessões nesta semana</strong><p>Publique um treino no calendário para acompanhá-lo aqui.</p><button className="secondary-button" onClick={() => onCreate()}>Criar treino</button></div>}
+      <div className="calendar-footer"><div><span><i className="swim-dot" />Natação</span><span><i className="strength-dot" />Força</span><span><i className="draft-dot" />Rascunho</span></div><p><Sparkles size={13} />Somente sessões publicadas na API</p></div>
+    </section>
+    {detail && <ModalShell title={detail.title ?? "Treino publicado"} subtitle={`${detail.target ?? "Equipe inteira"} · ${detail.scheduledAt?.slice(11, 16) ?? "08:00"} · ${detail.status === "published" ? "Publicado" : detail.status ?? "rascunho"}`} onClose={() => setDetail(null)} wide>
+      <div className="workout-detail">
+        <div className="workout-summary"><div><span className="option-icon aqua">{(detail.kind ?? "swim") === "strength" ? <Dumbbell size={19} /> : <Waves size={19} />}</span><div><b>{detail.title ?? "Treino publicado"}</b><small>{detail.date ? `${detail.date.split("-").reverse().join("/")} · ` : ""}{detail.distanceMeters ? `${formatNumber(detail.distanceMeters)} m` : "sessão de força"} · {detail.target ?? "Equipe inteira"}</small></div></div><span className={`zone-tag ${(detail.zone ?? "A1").toLowerCase()}`}>{detail.zone ?? "A1"}</span></div>
+        <div className="ai-block-list">{(detail.prescriptionText?.split("\n").filter(Boolean) ?? detail.blocks ?? ["Sem prescrição detalhada."]).map((line, index) => <div className="workout-block" key={`${line}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><div><b>{index === 0 ? "Bloco inicial" : `Bloco ${index + 1}`}</b><p>{line}</p></div></div>)}</div>
+        <div className="calendar-footer"><div><span><i className="swim-dot" />{detail.zone ?? "A1"}</span><span><CircleCheck size={13} />{detail.status === "published" ? "Publicado" : "Rascunho"}</span></div><button className="secondary-button small" onClick={() => { setDetail(null); onCreate({ id: detail.id, title: detail.title ?? "Treino publicado", prompt: detail.prescriptionText ?? detail.blocks?.join("\n") ?? "", distanceMeters: Number(detail.distanceMeters ?? 0), zone: detail.zone ?? "A1", kind: detail.kind === "strength" ? "strength" : "swim" }); }}>Duplicar como novo treino</button></div>
+      </div>
+      </ModalShell>}
+  </>;
 }
 
 function LibraryView({ kind, records, onUse, onEdit }: { kind: "swim" | "strength"; records: PublishedWorkoutRecord[]; onUse: (seed: WorkoutSeed) => void; onEdit: (initial?: WorkoutSeed) => void }) {
