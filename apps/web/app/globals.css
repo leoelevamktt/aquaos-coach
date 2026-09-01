@@ -2262,3 +2262,152 @@ body {
   .automation-actions button { min-height: 42px; }
   .modal > header h2 { font-size: 21px; }
 }
+
+/* ============================================================
+   FINAL TYPE NORMALIZATION — closes the cascade.
+   The layers above accumulated competing scales (6.5px–40px,
+   mixed weights and tracking). This layer is intentionally last
+   and wins: one scale, one rhythm, one reading floor.
+
+   Roles (and ONLY these roles):
+     --type-micro     12px  metadata, badges, axis labels
+     --type-caption   13px  secondary copy, table headers
+     --type-control   14px  buttons, inputs, list titles
+     --type-body      15px  reading text
+     --type-subtitle  17px  card-level emphasis
+     --type-section   22px  section titles (h2)
+     --type-page      clamp page titles (h1)
+   ============================================================ */
+:root {
+  --type-micro: 12px;
+  --type-caption: 13px;
+  --type-control: 14px;
+  --type-body: 15px;
+  --type-subtitle: 17px;
+  --type-section: 22px;
+  --type-page: clamp(30px, 2.6vw, 38px);
+}
+
+/* Reading floor: nothing in the coach product renders below 11px,
+   and only one-line operational chips may use 11px. */
+body :is(
+  .priority, .zone-tag, .automation-priority, .automation-triggers em,
+  .review-badge, .done-badge, .real-video-chip, .processing-badge,
+  .meet-priority, .composer-steps > span, .rkf-status, .qualified,
+  .inbox-tabs button span, .capabilities span, .connector-status,
+  .progress-ring.small b, .skill-pills i, .quadrant button,
+  .live-analysis-banner > span, .rkf-channel, .rkf-decisions article > span
+) { font-size: 11px; letter-spacing: .04em; }
+
+/* Weight and tracking contract: two weights carry the UI.
+   600 = interactive/list labels · 700 = data and titles. */
+body :is(.eyebrow, .nav-kicker, .roster-head, .section-head h2,
+  .page-title h1, .metric-card strong) { font-weight: 700; }
+body :is(.athlete-row b, .create-options strong, .session-strip strong,
+  .water-list b, .insight-row b, .meet-list b, .rkf-work-queue strong) { font-weight: 650; }
+
+/* ── Fluxo de decisão (rkf-method-map) ──────────────────────
+   Was: bare <i>/<b> spans colliding at 9–11px with no structure.
+   Now: ordered step pills on one rhythm, chevron separated. */
+.rkf-method-map > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 20px;
+}
+.rkf-method-map > div > span {
+  flex: 1 1 130px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfcfe;
+  color: var(--muted);
+  font-size: var(--type-caption);
+  text-align: left;
+}
+.rkf-method-map > div > span i {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.rkf-method-map > div > span b {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--type-caption);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rkf-method-map > div > span svg {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: #a5b4c2;
+}
+.rkf-method-map .section-head { margin-bottom: 0; }
+
+/* ── Roster table ───────────────────────────────────────────
+   Was: 7–10.5px mixed across columns, header unreadable.
+   Now: header micro/uppercase, cells caption+control, one rhythm. */
+.roster-head {
+  min-height: 46px;
+  align-items: center;
+  color: #7d8d95;
+  font-size: var(--type-micro);
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+.athlete-row { min-height: 72px; }
+.athlete-row > span { gap: 4px; }
+.athlete-row b { font-size: var(--type-control); font-weight: 650; }
+.athlete-row small { font-size: var(--type-micro); line-height: 1.4; }
+.athlete-person > i { font-size: 11px; }
+.athlete-row .progress-ring.small { flex: 0 0 auto; }
+
+/* ── Section titles inside cards: one size everywhere ─────── */
+.section-head h2 { font-size: var(--type-section); }
+.weekly-digest h3, .library-card h3, .video-meta h3,
+.methodology-skills header h3, .readiness-history h3,
+.evidence-source > header h3, .architecture-copy h2 {
+  font-size: var(--type-subtitle);
+  line-height: 1.3;
+}
+
+/* ── Numerals: single family, single scale step ───────────── */
+.metric-card strong { font-size: 23px; }
+.attendance-score > strong { font-size: 26px; }
+.meet-countdown > strong { font-size: 40px; }
+.rkf-command-heading > strong { font-size: 38px; }
+.readiness-decision > strong { font-size: 32px; }
+.readiness-metrics b { font-size: 24px; }
+.rkf-coverage-metrics strong { font-size: 26px; }
+
+/* ── Mobile keeps the same roles, one step down ───────────── */
+@media (max-width: 760px) {
+  :root {
+    --type-micro: 11px;
+    --type-caption: 12px;
+    --type-control: 13px;
+    --type-body: 14px;
+    --type-subtitle: 16px;
+    --type-section: 20px;
+    --type-page: 28px;
+  }
+  .rkf-method-map > div > span { flex-basis: 100%; }
+  .rkf-method-map > div > span svg { transform: rotate(90deg); }
+}
