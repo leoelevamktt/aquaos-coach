@@ -77,7 +77,36 @@ function durationLabel(seconds?: number) {
   return `${minutes} min`;
 }
 
-function mapWorkout(workout: WorkoutTemplate, prescriptionId?: string, scheduledDate = workout.scheduledDate) {
+function poolLength(value: unknown): 25 | 50 | undefined {
+  if (value === 25 || value === 50) return value;
+  if (typeof value !== "string") return undefined;
+  if (/(?:^|\D)25(?:\D|$)/.test(value)) return 25;
+  if (/(?:^|\D)50(?:\D|$)/.test(value)) return 50;
+  return undefined;
+}
+
+function workoutPoolLength(
+  workout: WorkoutTemplate | ManagedRecord,
+  demo: DemoStore,
+): 25 | 50 {
+  const direct = poolLength(
+    "poolLengthM" in workout ? workout.poolLengthM : undefined,
+  )
+    ?? poolLength("pool" in workout ? workout.pool : undefined)
+    ?? poolLength(workout.poolId);
+  if (direct) return direct;
+  return poolLength(
+    demo.pools.find((pool) => pool.id === workout.poolId)?.lengthMeters,
+  ) ?? 50;
+}
+
+function mapWorkout(
+  workout: WorkoutTemplate,
+  prescriptionId?: string,
+  scheduledDate = workout.scheduledDate,
+  poolLengthM: 25 | 50 = 50,
+  prescribedDistance?: number,
+) {
   const blocks = workout.blocks.map((block) => ({
     id: block.id,
     title: block.name,
@@ -104,16 +133,24 @@ function mapWorkout(workout: WorkoutTemplate, prescriptionId?: string, scheduled
     title: workout.title.replace(/\s*-\s*[\d.]+\s*m$/i, ""),
     objective: workout.objective,
     date: scheduledDate,
-    poolLengthM: 50,
-    volumeMeters: workoutDistance(workout.blocks),
+    poolLengthM,
+    volumeMeters: prescribedDistance ?? workoutDistance(workout.blocks),
     zone: mainStep?.targetType === "pace" ? "A2" : "Técnica",
     expectedPse,
     blocks,
   };
 }
 
-function mapManagedWorkout(workout: ManagedRecord, prescriptionId?: string) {
+function mapManagedWorkout(
+  workout: ManagedRecord,
+  demo: DemoStore,
+  prescriptionId?: string,
+) {
   const rawBlocks = Array.isArray(workout.blocks) ? workout.blocks as WorkoutBlock[] : [];
+  const poolLengthM = workoutPoolLength(workout, demo);
+  const prescribedDistance = Number(
+    workout.distanceMeters ?? workout.volumeMeters ?? 0,
+  ) || undefined;
   if (rawBlocks.length) {
     return mapWorkout({
       id: workout.id,
@@ -128,16 +165,16 @@ function mapManagedWorkout(workout: ManagedRecord, prescriptionId?: string) {
       createdBy: String(workout.actorId ?? "coach"),
       createdAt: workout.createdAt,
       updatedAt: workout.updatedAt,
-    }, prescriptionId);
+    }, prescriptionId, dateOf(workout), poolLengthM, prescribedDistance);
   }
-  const volumeMeters = Number(workout.distanceMeters ?? 0);
+  const volumeMeters = Number(workout.distanceMeters ?? workout.volumeMeters ?? 0);
   return {
     id: workout.id,
     prescriptionId,
     title: String(workout.title ?? "Sessão de treino"),
     objective: String(workout.objective ?? "Sessão prescrita pela comissão técnica."),
     date: dateOf(workout),
-    poolLengthM: 50,
+    poolLengthM,
     volumeMeters,
     zone: String(workout.zone ?? "A2"),
     expectedPse: Number(workout.expectedPse ?? 6),
@@ -159,6 +196,108 @@ function mapManagedWorkout(workout: ManagedRecord, prescriptionId?: string) {
   };
 }
 
+function embeddedPrescription(
+  prescription: ManagedRecord,
+): Record<string, unknown> | undefined {
+  const snapshot = prescription.publishedSnapshot ?? prescription.prescription;
+  return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+    ? snapshot as Record<string, unknown>
+    : undefined;
+}
+
+function embeddedBlockKind(component: string) {
+  const normalized = component.toLocaleLowerCase("pt-BR");
+  if (normalized.includes("aquecimento")) return "warmup";
+  if (normalized.includes("principal")) return "main";
+  if (normalized.includes("regenerativo")) return "cooldown";
+  return "technical";
+}
+
+function mapEmbeddedPrescription(prescription: ManagedRecord) {
+  const embedded = embeddedPrescription(prescription);
+  if (!embedded) return undefined;
+  const rawBlocks = Array.isArray(embedded.blocks)
+    ? embedded.blocks as Array<Record<string, unknown>>
+    : [];
+  const blocks = rawBlocks.map((block, blockIndex) => {
+    const blockId = String(block.id ?? `${prescription.id}-block-${blockIndex + 1}`);
+    const component = String(block.component ?? block.name ?? `Bloco ${blockIndex + 1}`);
+    const rawSteps = Array.isArray(block.steps)
+      ? block.steps as Array<Record<string, unknown>>
+      : [];
+    const steps = rawSteps.length
+      ? rawSteps.map((step, stepIndex) => ({
+        id: String(step.id ?? `${blockId}-step-${stepIndex + 1}`),
+        repetitions: Number(step.repetitions ?? 1),
+        distanceMeters: Number(step.distanceMeters ?? 0) || undefined,
+        durationSeconds: Number(step.durationSeconds ?? 0) || undefined,
+        stroke: String(step.stroke ?? "mixed"),
+        target: String(step.targetValue ?? step.target ?? block.zone ?? ""),
+        interval: durationLabel(Number(step.intervalSeconds ?? 0) || undefined),
+        equipment: Array.isArray(step.equipment)
+          ? step.equipment.map(String)
+          : [],
+        notes: typeof step.notes === "string" ? step.notes : undefined,
+        kind: String(step.kind ?? embeddedBlockKind(component)),
+      }))
+      : [{
+        id: `${blockId}-step`,
+        repetitions: 1,
+        distanceMeters: Number(block.volumeM ?? block.volumeMeters ?? 0) || undefined,
+        stroke: "mixed",
+        target: String(block.zone ?? embedded.primaryZone ?? ""),
+        equipment: Array.isArray(block.materials)
+          ? block.materials.map(String)
+          : [],
+        notes: typeof block.prescriptionText === "string"
+          ? block.prescriptionText
+          : undefined,
+        kind: embeddedBlockKind(component),
+      }];
+    return {
+      id: blockId,
+      title: component,
+      repeatCount: Number(block.repeatCount ?? 1),
+      volumeMeters: Number(
+        block.volumeM
+        ?? block.volumeMeters
+        ?? steps.reduce(
+          (total, step) =>
+            total + (step.distanceMeters ?? 0) * step.repetitions,
+          0,
+        ),
+      ),
+      steps,
+    };
+  });
+  const date = String(
+    embedded.date
+    ?? embedded.scheduledDate
+    ?? prescription.date
+    ?? embedded.generatedAtUtc
+    ?? prescription.approvedAt
+    ?? prescription.createdAt,
+  ).slice(0, 10);
+  return {
+    id: String(embedded.id ?? prescription.id),
+    prescriptionId: prescription.id,
+    title: String(embedded.title ?? prescription.title ?? "Sessão RKF"),
+    objective: String(
+      embedded.objective ?? "Sessão prescrita pela comissão técnica.",
+    ),
+    date,
+    poolLengthM: poolLength(embedded.poolLengthM ?? embedded.pool) ?? 50,
+    volumeMeters: Number(
+      embedded.totalVolumeM
+      ?? embedded.distanceMeters
+      ?? blocks.reduce((total, block) => total + block.volumeMeters, 0),
+    ),
+    zone: String(embedded.primaryZone ?? embedded.zone ?? "A2"),
+    expectedPse: Number(embedded.expectedPse ?? 6),
+    blocks,
+  };
+}
+
 function prescriptionTargetsAthlete(store: ManagedStore, prescription: ManagedRecord, athlete: ManagedRecord) {
   if (prescription.athleteId === athlete.id || (prescription.targetType === "athlete" && prescription.targetId === athlete.id)) return true;
   if (prescription.targetType === "team") return true;
@@ -170,6 +309,54 @@ function prescriptionTargetsAthlete(store: ManagedStore, prescription: ManagedRe
     if (athleteIds.includes(athlete.id) || group.name === athlete.group) groupIds.push(group.id);
   }
   return groupIds.includes(String(prescription.targetId));
+}
+
+function personalizedWorkout<T extends WorkoutTemplate | ManagedRecord>(
+  workout: T,
+  athleteOverrides: unknown,
+  athleteIds: string[],
+): T {
+  if (!Array.isArray(athleteOverrides)) return workout;
+  const overrides = athleteOverrides as Array<{
+    athleteId?: unknown;
+    changedFields?: unknown;
+  }>;
+  const override = overrides.find((candidate) =>
+    typeof candidate.athleteId === "string"
+    && athleteIds.includes(candidate.athleteId));
+  if (
+    !override?.changedFields
+    || typeof override.changedFields !== "object"
+    || Array.isArray(override.changedFields)
+  ) return workout;
+  const allowed = [
+    "title",
+    "objective",
+    "date",
+    "scheduledDate",
+    "poolId",
+    "pool",
+    "poolLengthM",
+    "blocks",
+    "distanceMeters",
+    "zone",
+    "expectedPse",
+  ];
+  const changes = Object.fromEntries(
+    Object.entries(override.changedFields).filter(([key]) =>
+      allowed.includes(key)),
+  );
+  if (
+    "blocks" in override.changedFields
+    && !("distanceMeters" in override.changedFields)
+    && !("volumeMeters" in override.changedFields)
+  ) changes.distanceMeters = undefined;
+  return {
+    ...workout,
+    ...changes,
+    id: workout.id,
+    organizationId: workout.organizationId,
+  };
 }
 
 function executionMatches(
@@ -184,9 +371,8 @@ function executionMatches(
   const executionSessionId = typeof execution.sessionId === "string"
     ? execution.sessionId
     : undefined;
-  if (executionPrescriptionId || executionSessionId) {
-    return executionPrescriptionId === prescriptionId || executionSessionId === sessionId;
-  }
+  if (executionPrescriptionId) return executionPrescriptionId === prescriptionId;
+  if (executionSessionId) return executionSessionId === sessionId;
   return dateOf(execution) === date;
 }
 
@@ -208,7 +394,7 @@ function demoPrescriptionForAthlete(demo: DemoStore, athlete: ManagedRecord, dat
     item.id === prescription.workoutTemplateId
     && item.status === "published"
     && (item.scheduledDate === date || item.scheduledDate === new Date().toISOString().slice(0, 10)));
-  return workout ? { prescription, workout } : undefined;
+  return workout ? { prescription, workout, athleteId: demoAthlete.id } : undefined;
 }
 
 function aggregate(store: ManagedStore, demo: DemoStore, athleteId: string, organizationId: string, date: string) {
@@ -224,7 +410,7 @@ function aggregate(store: ManagedStore, demo: DemoStore, athleteId: string, orga
   const executions = store.list("sessionExecutions").filter(own);
   const weekExecutions = executions.filter(inWeek);
   const assignmentIds = new Set<string>();
-  const prescribedWorkouts = store.list("prescriptions")
+  const prescribedSessions = store.list("prescriptions")
     .filter((item) =>
       item.organizationId === organizationId
       && item.status === "PUBLISHED"
@@ -234,30 +420,70 @@ function aggregate(store: ManagedStore, demo: DemoStore, athleteId: string, orga
     ).localeCompare(String(
       left.publishedAt ?? left.approvedAt ?? left.updatedAt,
     )))
-    .map((prescription) => ({
-      prescription,
-      workout: store.get("workouts", String(prescription.workoutId ?? prescription.workoutTemplateId ?? "")),
-    }))
-    .filter((assignment): assignment is { prescription: ManagedRecord; workout: ManagedRecord } =>
-      Boolean(assignment.workout?.status === "published"))
-    .filter(({ workout }) => {
-      if (assignmentIds.has(workout.id)) return false;
-      assignmentIds.add(workout.id);
+    .map((prescription) => {
+      const workout = store.get(
+        "workouts",
+        String(prescription.workoutId ?? prescription.workoutTemplateId ?? ""),
+      );
+      return {
+        prescription,
+        session: workout?.status === "published"
+          ? mapManagedWorkout(
+            personalizedWorkout(
+              workout,
+              prescription.athleteOverrides,
+              [athleteId],
+            ),
+            demo,
+            prescription.id,
+          )
+          : mapEmbeddedPrescription(prescription),
+      };
+    })
+    .filter((assignment): assignment is {
+      prescription: ManagedRecord;
+      session: NonNullable<ReturnType<typeof mapEmbeddedPrescription>>;
+    } => Boolean(assignment.session))
+    .filter(({ session: prescribedSession }) => {
+      if (assignmentIds.has(prescribedSession.id)) return false;
+      assignmentIds.add(prescribedSession.id);
       return true;
     });
-  const weekAssignments = prescribedWorkouts.filter(({ workout }) => inWeek(workout));
-  const todayAssignment = prescribedWorkouts.find(({ workout }) => dateOf(workout) === date);
+  const weekAssignments = prescribedSessions.filter(
+    ({ session: prescribedSession }) =>
+      prescribedSession.date >= range.start
+      && prescribedSession.date <= range.end,
+  );
+  const todayAssignment = prescribedSessions.find(
+    ({ session: prescribedSession }) => prescribedSession.date === date,
+  );
   const demoAssignment = todayAssignment ? undefined : demoPrescriptionForAthlete(demo, athlete, date);
+  const personalizedDemoWorkout = demoAssignment
+    ? personalizedWorkout(
+      demoAssignment.workout,
+      demoAssignment.prescription.athleteOverrides,
+      [athleteId, demoAssignment.athleteId],
+    )
+    : undefined;
   const session = todayAssignment
-    ? mapManagedWorkout(todayAssignment.workout, todayAssignment.prescription.id)
-    : demoAssignment
-      ? mapWorkout(demoAssignment.workout, demoAssignment.prescription.id, date)
+    ? todayAssignment.session
+    : demoAssignment && personalizedDemoWorkout
+      ? mapWorkout(
+        personalizedDemoWorkout,
+        demoAssignment.prescription.id,
+        date,
+        workoutPoolLength(personalizedDemoWorkout, demo),
+      )
       : null;
   const completedToday = session
     ? executions.find((item) =>
       executionMatches(item, session.prescriptionId, session.id, date))
     : executions.find((item) => dateOf(item) === date);
-  const plannedMeters = weekAssignments.reduce((sum, { workout }) => sum + Number(workout.distanceMeters ?? 0), 0)
+  const plannedMeters = weekAssignments.reduce(
+    (sum, { session: prescribedSession }) =>
+      sum + prescribedSession.volumeMeters,
+    0,
+  )
     || (session ? session.volumeMeters * Math.max(1, Number((athlete.availability as { sessionsPerWeek?: number } | undefined)?.sessionsPerWeek ?? 1)) : 0);
   const completedMeters = weekExecutions.reduce((sum, item) => sum + Number(item.distanceMeters ?? 0), 0);
   const load = store.list("loadSnapshots").filter(own);
@@ -293,18 +519,18 @@ function aggregate(store: ManagedStore, demo: DemoStore, athleteId: string, orga
     status: meet.status,
     target: meet.id === targetMeet?.id,
   }));
-  const weekSessions = weekAssignments.map(({ prescription, workout }) => ({
-    id: workout.id,
-    date: dateOf(workout),
-    title: workout.title,
-    volumeMeters: Number(workout.distanceMeters ?? 0),
-    zone: String(workout.zone ?? "A2"),
+  const weekSessions = weekAssignments.map(({ prescription, session: prescribedSession }) => ({
+    id: prescribedSession.id,
+    date: prescribedSession.date,
+    title: prescribedSession.title,
+    volumeMeters: prescribedSession.volumeMeters,
+    zone: prescribedSession.zone,
     completed: weekExecutions.some((execution) =>
       executionMatches(
         execution,
         prescription.id,
-        workout.id,
-        dateOf(workout),
+        prescribedSession.id,
+        prescribedSession.date,
       )),
   }));
   if (weekSessions.length === 0 && session && session.date >= range.start && session.date <= range.end) {

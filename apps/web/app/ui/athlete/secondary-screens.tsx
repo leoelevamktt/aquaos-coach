@@ -105,11 +105,13 @@ export function CompetitionResult({
 }) {
   const [event, setEvent] = useState("400 Livre");
   const [time, setTime] = useState("");
+  const [raceDate, setRaceDate] = useState(meet?.startsOn ?? "");
   const [placement, setPlacement] = useState("");
   const [markKind, setMarkKind] = useState("Oficial");
   const [notes, setNotes] = useState("");
   const [validation, setValidation] = useState("");
   const distanceM = Math.max(25, Number(event.match(/\d+/)?.[0] ?? 100));
+  const meetEndsOn = meet?.endsOn ?? meet?.startsOn;
   return <form className="athlete-form competition-form" onSubmit={(formEvent) => {
     formEvent.preventDefault();
     const timeSeconds = seconds(time);
@@ -117,10 +119,19 @@ export function CompetitionResult({
       setValidation("Informe o tempo como 3:51.20 ou 231.20.");
       return;
     }
+    if (
+      !raceDate
+      || (meet?.startsOn && raceDate < meet.startsOn)
+      || (meetEndsOn && raceDate > meetEndsOn)
+    ) {
+      setValidation("Informe uma data dentro do período da competição.");
+      return;
+    }
     setValidation("");
     onSave({
       meetId: meet?.id,
       kind: "competition",
+      date: raceDate,
       event,
       poolLengthM: meet?.pool?.includes("25") ? 25 : 50,
       sessionDistanceM: distanceM,
@@ -135,6 +146,7 @@ export function CompetitionResult({
   }}>
     <div className="athlete-form-intro"><span>{meet ? dateLabel(meet.startsOn) : "Competição"}</span><h1>Resultado da competição</h1><p>{meet?.name ?? "Selecione uma competição na tela anterior."}</p></div>
     <Field label="Prova"><select value={event} onChange={(eventInput) => setEvent(eventInput.target.value)}><option>400 Livre</option><option>200 Livre</option><option>100 Livre</option><option>50 Livre</option></select></Field>
+    <Field label="Data da prova"><input required type="date" min={meet?.startsOn} max={meet?.endsOn ?? meet?.startsOn} value={raceDate} onChange={(eventInput) => setRaceDate(eventInput.target.value)} /></Field>
     <Field label="Tempo"><input required inputMode="decimal" value={time} onChange={(eventInput) => setTime(eventInput.target.value)} placeholder="3:51.20" /></Field>
     <Field label="Colocação"><input value={placement} onChange={(eventInput) => setPlacement(eventInput.target.value)} placeholder="Ex.: 2º" /></Field>
     <Field label="Tipo de marca"><select value={markKind} onChange={(eventInput) => setMarkKind(eventInput.target.value)}><option>Oficial</option><option>PB</option><option>SB</option></select></Field>

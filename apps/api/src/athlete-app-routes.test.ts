@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { attachAuthStore, login } from "./auth.js";
 import { registerAthleteAppRoutes } from "./athlete-app-routes.js";
 import { ManagedStore } from "./managed-store.js";
+import { registerRkfRoutes } from "./rkf-routes.js";
 import { DemoStore } from "./store.js";
 
 const root = mkdtempSync(join(tmpdir(), "athlete-app-"));
@@ -13,6 +14,7 @@ const store = new ManagedStore(join(root, "store.json"));
 attachAuthStore(store);
 const app = Fastify({ logger: false });
 registerAthleteAppRoutes(app, store, new DemoStore());
+registerRkfRoutes(app, store);
 const athleteCookie = `natacao_session=${(await login("ana@natacao.local", "natacao-demo"))!.token}`;
 const coachCookie = `natacao_session=${(await login("coach@natacao.local", "natacao-demo"))!.token}`;
 
@@ -89,7 +91,7 @@ describe("app do atleta", () => {
       status: "published",
       organizationId: "org-demo",
     });
-    store.create("prescriptions", {
+    const previousPrescription = store.create("prescriptions", {
       workoutId: firstWorkout.id,
       targetType: "athlete",
       targetId: "ana-souza",
@@ -115,13 +117,34 @@ describe("app do atleta", () => {
     });
     store.create("sessionExecutions", {
       athleteId: "ana-souza",
-      prescriptionId: activePrescription.id,
+      prescriptionId: previousPrescription.id,
       sessionId: firstWorkout.id,
       date: "2026-09-02",
       distanceMeters: 1000,
       organizationId: "org-demo",
     });
 
+    const beforeCurrentExecution = await app.inject({
+      method: "GET",
+      url: "/api/v1/athlete/app?date=2026-09-02",
+      headers: { cookie: athleteCookie },
+    });
+
+    expect(beforeCurrentExecution.statusCode).toBe(200);
+    expect(beforeCurrentExecution.json().week.sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: firstWorkout.id, completed: false }),
+      ]),
+    );
+
+    store.create("sessionExecutions", {
+      athleteId: "ana-souza",
+      prescriptionId: activePrescription.id,
+      sessionId: firstWorkout.id,
+      date: "2026-09-02",
+      distanceMeters: 1000,
+      organizationId: "org-demo",
+    });
     const response = await app.inject({
       method: "GET",
       url: "/api/v1/athlete/app?date=2026-09-02",
@@ -137,6 +160,178 @@ describe("app do atleta", () => {
       expect.objectContaining({ id: firstWorkout.id, completed: true }),
       expect.objectContaining({ id: secondWorkout.id, completed: false }),
     ]));
+  });
+
+  it("aplica a piscina e a personalização destinadas ao atleta", async () => {
+    const workout = store.create("workouts", {
+      title: "Sessão-base",
+      date: "2026-09-03",
+      poolId: "pool-25",
+      distanceMeters: 1000,
+      zone: "A2",
+      blocks: [{
+        id: "base-block",
+        name: "Série-base",
+        order: 1,
+        repeatCount: 1,
+        steps: [{
+          id: "base-step",
+          order: 1,
+          kind: "main",
+          repetitions: 10,
+          distanceMeters: 100,
+          stroke: "freestyle",
+          targetType: "pace",
+          targetValue: "ritmo-base",
+          equipment: [],
+        }],
+      }],
+      status: "published",
+      organizationId: "org-demo",
+    });
+    store.create("prescriptions", {
+      workoutId: workout.id,
+      targetType: "team",
+      targetId: "org-demo",
+      athleteOverrides: [{
+        athleteId: "ana-souza",
+        changedFields: {
+          title: "Sessão personalizada",
+          blocks: [{
+            id: "personalized-block",
+            name: "Série personalizada",
+            order: 1,
+            repeatCount: 1,
+            steps: [{
+              id: "personalized-step",
+              order: 1,
+              kind: "main",
+              repetitions: 12,
+              distanceMeters: 100,
+              stroke: "freestyle",
+              targetType: "pace",
+              targetValue: "ritmo personalizado",
+              equipment: [],
+            }],
+          }],
+        },
+      }],
+      status: "PUBLISHED",
+      publishedAt: "2026-09-01T12:00:00.000Z",
+      organizationId: "org-demo",
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/athlete/app?date=2026-09-03",
+      headers: { cookie: athleteCookie },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().today.session).toMatchObject({
+      id: workout.id,
+      title: "Sessão personalizada",
+      poolLengthM: 25,
+      volumeMeters: 1200,
+      blocks: [{
+        id: "personalized-block",
+        steps: [{ target: "ritmo personalizado" }],
+      }],
+    });
+    const session = response.json().today.session;
+    const result = await app.inject({
+      method: "POST",
+      url: "/api/v1/athlete/results",
+      headers: { cookie: athleteCookie },
+      payload: {
+        date: session.date,
+        prescriptionId: session.prescriptionId,
+        sessionId: session.id,
+        kind: "training",
+        event: session.title,
+        poolLengthM: session.poolLengthM,
+        sessionDistanceM: session.volumeMeters,
+        durationMinutes: 30,
+        pse: 6,
+        sets: [{
+          set: 1,
+          label: "Série personalizada",
+          repetitions: [{
+            repetition: 1,
+            distanceM: 100,
+            timeSeconds: 70,
+            stroke: "livre",
+            splits: [],
+          }],
+        }],
+      },
+    });
+    expect(result.statusCode).toBe(201);
+    expect(result.json()).toMatchObject({ poolLengthM: 25 });
+  });
+
+  it("inclui uma prescrição RKF aprovada sem workout vinculado", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/rkf/prescriptions",
+      headers: { cookie: coachCookie },
+      payload: {
+        athleteId: "ana-souza",
+        title: "Sessão RKF aprovada",
+        prescription: {
+          id: "rkf-session-approved",
+          title: "Sessão RKF A2",
+          objective: "Sustentar ritmo aeróbio",
+          date: "2026-09-04",
+          poolLengthM: 25,
+          primaryZone: "A2",
+          totalVolumeM: 1800,
+          blocks: [{
+            order: 1,
+            component: "SÉRIE PRINCIPAL",
+            volumeM: 1800,
+            zone: "A2",
+            prescriptionText: "18x100 m em A2",
+            materials: ["PULL"],
+          }],
+        },
+        audit: { passed: true },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const approved = await app.inject({
+      method: "POST",
+      url: `/api/v1/rkf/prescriptions/${created.json().id}/approve`,
+      headers: { cookie: coachCookie },
+      payload: {},
+    });
+    expect(approved.statusCode).toBe(200);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/athlete/app?date=2026-09-04",
+      headers: { cookie: athleteCookie },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().today.session).toMatchObject({
+      id: "rkf-session-approved",
+      prescriptionId: created.json().id,
+      title: "Sessão RKF A2",
+      date: "2026-09-04",
+      poolLengthM: 25,
+      volumeMeters: 1800,
+      zone: "A2",
+      blocks: [{
+        title: "SÉRIE PRINCIPAL",
+        volumeMeters: 1800,
+        steps: [{
+          target: "A2",
+          equipment: ["PULL"],
+          notes: "18x100 m em A2",
+        }],
+      }],
+    });
   });
 
   it("impede comissão técnica de usar o contexto do atleta", async () => {
@@ -189,6 +384,41 @@ describe("app do atleta", () => {
     expect(response.statusCode).toBe(201);
     expect(response.json()).toMatchObject({ athleteId: "ana-souza", bestTimeSeconds: 127.5, averageTimeSeconds: 127.75 });
     expect(store.list("repetitionResults").filter((item) => item.resultId === response.json().id)).toHaveLength(2);
+  });
+
+  it("persiste a data real de um resultado retrospectivo", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/athlete/results",
+      headers: { cookie: athleteCookie },
+      payload: {
+        date: "2026-08-20",
+        meetId: "trofeu-brasil",
+        kind: "competition",
+        event: "100 m Livre",
+        poolLengthM: 50,
+        sessionDistanceM: 100,
+        durationMinutes: 1,
+        pse: 8,
+        sets: [{
+          set: 1,
+          label: "Resultado oficial",
+          repetitions: [{
+            repetition: 1,
+            distanceM: 100,
+            timeSeconds: 55.2,
+            stroke: "livre",
+            splits: [],
+          }],
+        }],
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      date: "2026-08-20",
+      kind: "competition",
+      meetId: "trofeu-brasil",
+    });
   });
 
   it("conclui uma execução uma única vez", async () => {
