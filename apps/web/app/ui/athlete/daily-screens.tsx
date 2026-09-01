@@ -122,7 +122,7 @@ export function AthleteSessionView({
     <section className="session-title"><span>Treino de hoje</span><h1>{session.title}</h1><p>{formatMeters(session.volumeMeters)} · {session.zone} · PSE alvo {session.expectedPse}</p><small>{session.objective}</small></section>
     <div className="session-block-list">{session.blocks.map((block, index) => <article className={block.steps.some((step) => step.kind === "main") ? "featured" : ""} key={block.id}>
       <span className={block.steps.some((step) => step.kind === "main") ? "yellow" : "blue"}>{String(index + 1).padStart(2, "0")}</span>
-      <div><b>{block.title}</b>{block.steps.map((step) => <p key={step.id}>{stepSummary(step)}{step.equipment.length ? ` · ${step.equipment.join(", ")}` : ""}{step.notes ? <small>{step.notes}</small> : null}</p>)}</div>
+      <div><b>{block.title}{block.repeatCount > 1 ? ` · ${block.repeatCount}×` : ""}</b>{block.steps.map((step) => <p key={step.id}>{stepSummary(step)}{step.equipment.length ? ` · ${step.equipment.join(", ")}` : ""}{step.notes ? <small>{step.notes}</small> : null}</p>)}{block.repeatCount > 1 ? <small>Repetir o bloco {block.repeatCount}×</small> : null}</div>
       <strong>{formatMeters(block.volumeMeters)}</strong>
     </article>)}</div>
     {transcript ? <div className="voice-review"><b>Revise antes de salvar</b><p>{transcript}</p><button type="button" onClick={() => setTranscript("")}>Descartar</button></div> : null}
@@ -148,7 +148,9 @@ export function ResultsForm({
 }) {
   const mainBlock = session.blocks.find((block) => block.steps.some((step) => step.kind === "main")) ?? session.blocks[0];
   const mainStep = mainBlock?.steps.find((step) => step.kind === "main") ?? mainBlock?.steps[0];
-  const initialCount = Math.min(24, Math.max(1, mainStep?.repetitions ?? 1));
+  const mainRepeat = Math.max(1, mainBlock?.repeatCount ?? 1);
+  const totalRepetitions = (mainStep?.repetitions ?? 1) * mainRepeat;
+  const initialCount = Math.min(24, Math.max(1, totalRepetitions));
   const [mode, setMode] = useState<"detailed" | "summary">("detailed");
   const [times, setTimes] = useState(() => Array.from({ length: initialCount }, () => ""));
   const [average, setAverage] = useState("");
@@ -157,8 +159,8 @@ export function ResultsForm({
   const [pse, setPse] = useState(session.expectedPse);
   const [notes, setNotes] = useState("");
   const [validation, setValidation] = useState("");
-  const distanceM = mainStep?.distanceMeters ?? Math.max(25, Math.round(mainBlock.volumeMeters / initialCount));
-  const protocol = `${mainStep?.repetitions ?? initialCount}×${distanceM} ${session.zone}`;
+  const distanceM = mainStep?.distanceMeters ?? Math.max(25, Math.round(mainBlock.volumeMeters / totalRepetitions));
+  const protocol = `${mainStep?.repetitions ?? initialCount}${mainRepeat > 1 ? `×${mainRepeat}` : ""}×${distanceM} ${session.zone}`;
   const submit = () => {
     const source = mode === "detailed" ? times : [best, average, last];
     const parsedTimes = source.map(parseTime);

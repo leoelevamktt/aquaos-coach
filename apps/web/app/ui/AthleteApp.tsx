@@ -42,6 +42,8 @@ import {
   type OnboardingProfile,
 } from "./athlete/types";
 
+const SELECTED_MEET_KEY = "rkf_selected_meet_id";
+
 export default function AthleteApp() {
   const pathname = usePathname();
   const router = useRouter();
@@ -51,7 +53,7 @@ export default function AthleteApp() {
   const [feedback, setFeedback] = useState("");
   const [appData, setAppData] = useState<AthleteAppData | null>(null);
   const [appLoading, setAppLoading] = useState(false);
-  const [selectedMeetId, setSelectedMeetId] = useState("");
+  const [selectedMeetId, setSelectedMeetIdState] = useState(() => typeof window !== "undefined" ? window.sessionStorage.getItem(SELECTED_MEET_KEY) ?? "" : "");
   const [sessions, setSessions] = useState(() => readOnboardingDraft()?.sessions ?? 8);
   const [days, setDays] = useState(() => readOnboardingDraft()?.days ?? ["SEG", "TER", "QUA", "QUI", "SEX"]);
   const [periods, setPeriods] = useState(() => readOnboardingDraft()?.periods ?? ["Manhã", "Tarde"]);
@@ -69,6 +71,10 @@ export default function AthleteApp() {
     router.push(inviteToken && next === "onboarding" ? `${target}?invite=${encodeURIComponent(inviteToken)}` : target);
   };
   const athleteFirstName = athleteName.trim().split(/\s+/)[0] || "Atleta";
+  const setSelectedMeetId = (meetId: string) => {
+    setSelectedMeetIdState(meetId);
+    if (typeof window !== "undefined") window.sessionStorage.setItem(SELECTED_MEET_KEY, meetId);
+  };
   const loadAthleteData = async () => {
     setAppLoading(true);
     try {
@@ -216,7 +222,7 @@ export default function AthleteApp() {
     setSaving(true); setFeedback("");
     try { await apiRequest("/api/v1/auth/logout", { method: "POST" }); }
     catch { /* a sessão já pode ter expirado; o cookie local ainda deve ser removido pelo próximo login */ }
-    finally { setAuthState("signed-out"); setAppData(null); setEmail(""); setPassword(""); setSaving(false); router.replace("/pt/athlete/login"); }
+    finally { setAuthState("signed-out"); setAppData(null); setEmail(""); setPassword(""); setSelectedMeetIdState(""); if (typeof window !== "undefined") window.sessionStorage.removeItem(SELECTED_MEET_KEY); setSaving(false); router.replace("/pt/athlete/login"); }
   };
   const finishOnboarding = async () => {
     if (!onboardingProfile.medicalAccepted || !onboardingProfile.responsibilityAccepted) { setFeedback("Aceite os termos de saúde e responsabilidade para continuar."); return; }

@@ -1,16 +1,14 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { WorkoutBlock, WorkoutTemplate } from "@natacao/domain";
+import type { TargetType, WorkoutBlock, WorkoutTemplate } from "@natacao/domain";
+import { normalizeZoneCode } from "@natacao/domain";
 import { getSession, sessionToken } from "./auth.js";
+import { calendarDateSchema } from "./date-schema.js";
 import type { ManagedRecord, ManagedStore } from "./managed-store.js";
 import type { DemoStore } from "./store.js";
 
-const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-const dateSchema = z.string().regex(datePattern).refine((value) => {
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-}, "Data inválida");
+const dateSchema = calendarDateSchema;
 const dateFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Sao_Paulo",
   year: "numeric",
@@ -101,7 +99,7 @@ function workoutPoolLength(
 }
 
 function mapWorkout(
-  workout: WorkoutTemplate,
+  workout: WorkoutTemplate & { zone?: unknown },
   prescriptionId?: string,
   scheduledDate = workout.scheduledDate,
   poolLengthM: 25 | 50 = 50,
@@ -135,10 +133,41 @@ function mapWorkout(
     date: scheduledDate,
     poolLengthM,
     volumeMeters: prescribedDistance ?? workoutDistance(workout.blocks),
-    zone: mainStep?.targetType === "pace" ? "A2" : "Técnica",
+    zone: workoutZoneLabel(workout, mainStep),
     expectedPse,
     blocks,
   };
+}
+
+/** Zonas oficiais do vocabulário RKF (diretas ou mapeadas), para extrair de textos de alvo. */
+const ZONE_TOKEN_PATTERN = /\b(A[1-3]|AN[12]|VALAT|EN[1-3]|N[12]|SP[123]|RP\d+)\b/i;
+
+function zoneFromTarget(target: unknown): string | undefined {
+  const match = ZONE_TOKEN_PATTERN.exec(String(target ?? ""));
+  if (!match) return undefined;
+  const normalized = normalizeZoneCode(match[1].toUpperCase());
+  return normalized.zone ?? (normalized.rdcMarker ? normalized.mappedFrom ?? match[1].toUpperCase() : undefined);
+}
+
+/**
+ * O rótulo de intensidade reflete o alvo da série principal: código de zona
+ * declarado no alvo, zona declarada do treino ou um rótulo honesto por tipo de
+ * alvo — nunca um rótulo fixo que mascara a intensidade real.
+ */
+function workoutZoneLabel(workout: WorkoutTemplate, mainStep?: { targetType?: string; targetValue?: string }): string {
+  const fromTarget = zoneFromTarget(mainStep?.targetValue);
+  if (fromTarget) return fromTarget;
+  const declared = typeof (workout as { zone?: unknown }).zone === "string" ? String((workout as { zone?: unknown }).zone).trim() : "";
+  if (declared) {
+    const normalized = normalizeZoneCode(declared);
+    return normalized.zone ?? declared;
+  }
+  const targetType = mainStep?.targetType ?? "technique";
+  if (targetType === "pace") return "Ritmo";
+  if (targetType === "heart_rate") return "FC";
+  if (targetType === "rpe") return "PSE";
+  if (targetType === "free") return "Livre";
+  return "Técnica";
 }
 
 function mapManagedWorkout(
@@ -165,6 +194,7 @@ function mapManagedWorkout(
       createdBy: String(workout.actorId ?? "coach"),
       createdAt: workout.createdAt,
       updatedAt: workout.updatedAt,
+      zone: typeof workout.zone === "string" ? workout.zone : undefined,
     }, prescriptionId, dateOf(workout), poolLengthM, prescribedDistance);
   }
   const volumeMeters = Number(workout.distanceMeters ?? workout.volumeMeters ?? 0);
@@ -298,17 +328,29 @@ function mapEmbeddedPrescription(prescription: ManagedRecord) {
   };
 }
 
-function prescriptionTargetsAthlete(store: ManagedStore, prescription: ManagedRecord, athlete: ManagedRecord) {
-  if (prescription.athleteId === athlete.id || (prescription.targetType === "athlete" && prescription.targetId === athlete.id)) return true;
-  if (prescription.targetType === "team") return true;
-  if (prescription.targetType !== "group") return false;
-  const groupIds = Array.isArray(athlete.groupIds) ? athlete.groupIds.map(String) : [];
-  if (typeof athlete.groupId === "string") groupIds.push(athlete.groupId);
+function athleteGroupIds(store: ManagedStore, athlete: ManagedRecord): string[] {
+  const groupIds = new Set<string>();
+  if (Array.isArray(athlete.groupIds)) athlete.groupIds.forEach((id) => groupIds.add(String(id)));
+  if (typeof athlete.groupId === "string") groupIds.add(athlete.groupId);
   for (const group of store.list("groups").filter((item) => item.organizationId === athlete.organizationId)) {
     const athleteIds = Array.isArray(group.athleteIds) ? group.athleteIds.map(String) : [];
-    if (athleteIds.includes(athlete.id) || group.name === athlete.group) groupIds.push(group.id);
+    if (athleteIds.includes(athlete.id) || group.name === athlete.group) groupIds.add(group.id);
   }
-  return groupIds.includes(String(prescription.targetId));
+  return [...groupIds];
+}
+
+function prescriptionTargetsAthlete(store: ManagedStore, prescription: ManagedRecord, athlete: ManagedRecord) {
+  if (prescription.athleteId === athlete.id || (prescription.targetType === "athlete" && prescription.targetId === athlete.id)) return true;
+  if (prescription.targetType === "team") {
+    // Equipe inteira (legado sem targetId ou alvo = organização) continua
+    // acessível; equipes específicas exigem pertencimento do atleta.
+    const targetId = String(prescription.targetId ?? "").trim();
+    return !targetId
+      || targetId === String(athlete.organizationId)
+      || athleteGroupIds(store, athlete).includes(targetId);
+  }
+  if (prescription.targetType !== "group") return false;
+  return athleteGroupIds(store, athlete).includes(String(prescription.targetId));
 }
 
 function accessibleSessionIds(
@@ -411,6 +453,7 @@ function personalizedWorkout<T extends WorkoutTemplate | ManagedRecord>(
     "poolLengthM",
     "blocks",
     "distanceMeters",
+    "volumeMeters",
     "zone",
     "expectedPse",
   ];
@@ -418,17 +461,42 @@ function personalizedWorkout<T extends WorkoutTemplate | ManagedRecord>(
     Object.entries(override.changedFields).filter(([key]) =>
       allowed.includes(key)),
   );
-  if (
-    "blocks" in override.changedFields
-    && !("distanceMeters" in override.changedFields)
-    && !("volumeMeters" in override.changedFields)
-  ) changes.distanceMeters = undefined;
+  // Com blocos personalizados o volume precisa acompanhar a nova série: usa o
+  // volume declarado no override e, na ausência dele, recalcula a partir dos
+  // novos blocos — nunca mantém a distância-base da sessão compartilhada.
+  if ("blocks" in changes && !("distanceMeters" in override.changedFields)) {
+    const declaredVolume = Number(
+      changes.volumeMeters
+      ?? (override.changedFields as { volumeMeters?: unknown }).volumeMeters
+      ?? 0,
+    );
+    changes.distanceMeters = Number.isFinite(declaredVolume) && declaredVolume > 0
+      ? declaredVolume
+      : computedBlocksVolume(changes.blocks) || undefined;
+  }
   return {
     ...workout,
     ...changes,
     id: workout.id,
     organizationId: workout.organizationId,
   };
+}
+
+/** Volume dos blocos personalizados, multiplicando repetições e repetições do bloco. */
+function computedBlocksVolume(blocks: unknown): number {
+  if (!Array.isArray(blocks)) return 0;
+  return (blocks as Array<Record<string, unknown>>).reduce((total, block) => {
+    if (!block || typeof block !== "object") return total;
+    const repeatCount = Math.max(1, Number(block.repeatCount ?? 1) || 1);
+    const rawSteps = Array.isArray((block as { steps?: unknown }).steps)
+      ? (block as { steps: unknown[] }).steps as Array<Record<string, unknown>>
+      : [];
+    const stepsVolume = rawSteps.reduce(
+      (sum, step) => sum + Math.max(0, Number(step?.distanceMeters ?? 0) || 0) * Math.max(1, Number(step.repetitions ?? 1) || 1),
+      0,
+    );
+    return total + stepsVolume * repeatCount;
+  }, 0);
 }
 
 function executionMatches(
@@ -859,6 +927,21 @@ export function registerAthleteAppRoutes(app: FastifyInstance, store: ManagedSto
       parsed.data.sessionId,
     )) {
       return reply.code(403).send({ error: "Sessão não autorizada para este atleta" });
+    }
+    if (
+      parsed.data.startedAt
+      && parsed.data.endedAt
+      && new Date(parsed.data.startedAt).getTime() > new Date(parsed.data.endedAt).getTime()
+    ) {
+      return reply.code(400).send({ error: "Cronologia do checkout inválida", details: { formErrors: [], fieldErrors: { startedAt: ["Início após o fim da sessão"] } } });
+    }
+    if (parsed.data.date && (parsed.data.startedAt || parsed.data.endedAt)) {
+      const localDates = new Set<string>();
+      if (parsed.data.endedAt) localDates.add(localDate(new Date(parsed.data.endedAt)));
+      if (parsed.data.startedAt) localDates.add(localDate(new Date(parsed.data.startedAt)));
+      if (!localDates.has(parsed.data.date)) {
+        return reply.code(400).send({ error: "Data do checkout não corresponde ao início ou fim informado" });
+      }
     }
     const endedAt = parsed.data.endedAt ?? new Date().toISOString();
     const date = parsed.data.date ?? localDate(new Date(endedAt));

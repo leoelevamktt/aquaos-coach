@@ -508,4 +508,202 @@ describe("app do atleta", () => {
       execution: { date: "2026-09-01" },
     });
   });
+
+  it("rotula a sessão pela intensidade real da série principal", async () => {
+    const zoneWorkout = store.create("workouts", {
+      title: "Tiro com alvo A3",
+      date: "2026-10-12",
+      distanceMeters: 600,
+      blocks: [{
+        id: "zone-block",
+        name: "Série principal",
+        order: 1,
+        repeatCount: 1,
+        steps: [{
+          id: "zone-step",
+          order: 1,
+          kind: "main",
+          repetitions: 6,
+          distanceMeters: 100,
+          stroke: "freestyle",
+          targetType: "pace",
+          targetValue: "ritmo A3",
+          equipment: [],
+        }],
+      }],
+      status: "published",
+      organizationId: "org-demo",
+    });
+    const paceWorkout = store.create("workouts", {
+      title: "Ritmo sem zona declarada",
+      date: "2026-10-13",
+      distanceMeters: 600,
+      blocks: [{
+        id: "pace-block",
+        name: "Principal",
+        order: 1,
+        repeatCount: 1,
+        steps: [{
+          id: "pace-step",
+          order: 1,
+          kind: "main",
+          repetitions: 6,
+          distanceMeters: 100,
+          stroke: "freestyle",
+          targetType: "pace",
+          targetValue: "ritmo de prova + 5s",
+          equipment: [],
+        }],
+      }],
+      status: "published",
+      organizationId: "org-demo",
+    });
+    store.create("prescriptions", { workoutId: zoneWorkout.id, targetType: "athlete", targetId: "ana-souza", status: "PUBLISHED", organizationId: "org-demo" });
+    store.create("prescriptions", { workoutId: paceWorkout.id, targetType: "athlete", targetId: "ana-souza", status: "PUBLISHED", organizationId: "org-demo" });
+
+    const zoneResponse = await app.inject({ method: "GET", url: "/api/v1/athlete/app?date=2026-10-12", headers: { cookie: athleteCookie } });
+    expect(zoneResponse.statusCode).toBe(200);
+    expect(zoneResponse.json().today.session).toMatchObject({ id: zoneWorkout.id, zone: "A3" });
+
+    const paceResponse = await app.inject({ method: "GET", url: "/api/v1/athlete/app?date=2026-10-13", headers: { cookie: athleteCookie } });
+    expect(paceResponse.statusCode).toBe(200);
+    expect(paceResponse.json().today.session).toMatchObject({ id: paceWorkout.id, zone: "Ritmo" });
+  });
+
+  it("aplica o volume declarado na personalização com blocos e volume", async () => {
+    const workout = store.create("workouts", {
+      title: "Base com override de volume",
+      date: "2026-09-06",
+      distanceMeters: 1000,
+      blocks: [{
+        id: "volume-base-block",
+        name: "Série-base",
+        order: 1,
+        repeatCount: 1,
+        steps: [{
+          id: "volume-base-step",
+          order: 1,
+          kind: "main",
+          repetitions: 10,
+          distanceMeters: 100,
+          stroke: "freestyle",
+          targetType: "pace",
+          targetValue: "ritmo-base",
+          equipment: [],
+        }],
+      }],
+      status: "published",
+      organizationId: "org-demo",
+    });
+    store.create("prescriptions", {
+      workoutId: workout.id,
+      targetType: "athlete",
+      targetId: "ana-souza",
+      athleteOverrides: [{
+        athleteId: "ana-souza",
+        changedFields: {
+          blocks: [{
+            id: "volume-personal-block",
+            name: "Série personalizada",
+            order: 1,
+            repeatCount: 1,
+            steps: [{
+              id: "volume-personal-step",
+              order: 1,
+              kind: "main",
+              repetitions: 12,
+              distanceMeters: 100,
+              stroke: "freestyle",
+              targetType: "pace",
+              targetValue: "ritmo personalizado",
+              equipment: [],
+            }],
+          }],
+          volumeMeters: 1500,
+        },
+      }],
+      status: "PUBLISHED",
+      publishedAt: "2026-09-01T13:00:00.000Z",
+      organizationId: "org-demo",
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/v1/athlete/app?date=2026-09-06", headers: { cookie: athleteCookie } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().today.session).toMatchObject({
+      id: workout.id,
+      volumeMeters: 1500,
+   });
+  });
+
+  it("não expõe prescrições de equipe fora do acesso do atleta", async () => {
+    const otherTeamWorkout = store.create("workouts", {
+      title: "Sessão de outra equipe",
+      date: "2026-09-07",
+      distanceMeters: 3000,
+      status: "published",
+      organizationId: "org-demo",
+    });
+    store.create("prescriptions", {
+      workoutId: otherTeamWorkout.id,
+      targetType: "team",
+      targetId: "team-sub-15",
+      status: "PUBLISHED",
+      organizationId: "org-demo",
+    });
+    const ownTeamWorkout = store.create("workouts", {
+      title: "Sessão da equipe inteira",
+      date: "2026-09-06",
+      distanceMeters: 1500,
+      status: "published",
+      organizationId: "org-demo",
+    });
+    store.create("prescriptions", {
+      workoutId: ownTeamWorkout.id,
+      targetType: "team",
+      targetId: "org-demo",
+      status: "PUBLISHED",
+      organizationId: "org-demo",
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/v1/athlete/app?date=2026-09-06", headers: { cookie: athleteCookie } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().today.session.title).not.toBe("Sessão de outra equipe");
+    expect(response.json().week.sessions).not.toContainEqual(expect.objectContaining({ id: otherTeamWorkout.id }));
+    expect(response.json().week.sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: ownTeamWorkout.id }),
+    ]));
+  });
+
+  it("rejeita checkout com cronologia contraditória", async () => {
+    const reversed = await app.inject({
+      method: "POST",
+      url: "/api/v1/athlete/checkout",
+      headers: { cookie: athleteCookie },
+      payload: {
+        prescriptionId: "prescription-1",
+        startedAt: "2026-09-01T12:00:00.000Z",
+        endedAt: "2026-09-01T10:00:00.000Z",
+        distanceMeters: 1000,
+        durationMinutes: 60,
+        pse: 6,
+      },
+    });
+    expect(reversed.statusCode).toBe(400);
+    expect(reversed.json().error).toBe("Cronologia do checkout inválida");
+
+    const mismatched = await app.inject({
+      method: "POST",
+      url: "/api/v1/athlete/checkout",
+      headers: { cookie: athleteCookie },
+      payload: {
+        date: "2026-09-10",
+        endedAt: "2026-09-01T12:00:00.000Z",
+        prescriptionId: "prescription-1",
+        distanceMeters: 1000,
+        durationMinutes: 30,
+        pse: 6,
+      },
+    });
+    expect(mismatched.statusCode).toBe(400);
+  });
 });
