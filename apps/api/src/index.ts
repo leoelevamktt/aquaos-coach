@@ -9,6 +9,7 @@ import { athleteMayAccess, attachAuthStore, getSession, login, logout, provision
 import { ManagedStore } from "./managed-store.js";
 import { registerOperationalRoutes, uploadRoot } from "./operational-routes.js";
 import { registerAiRoutes } from "./ai-routes.js";
+import { registerCoachBriefingRoutes } from "./coach-briefing-routes.js";
 import { registerAthleteAppRoutes } from "./athlete-app-routes.js";
 import { registerRkfRoutes } from "./rkf-routes.js";
 import { registerRkfSeedCatalogRoutes } from "./rkf-seed-catalog.js";
@@ -50,6 +51,7 @@ app.addHook("onRequest", async (request, reply) => {
 await app.register(fastifyStatic, { root: uploadRoot, prefix: "/uploads/", decorateReply: false });
 registerOperationalRoutes(app, managedStore, videoQueue);
 registerAiRoutes(app, managedStore);
+registerCoachBriefingRoutes(app, managedStore);
 registerAthleteAppRoutes(app, managedStore, store);
 registerRkfRoutes(app, managedStore);
 registerRkfSeedCatalogRoutes(app);

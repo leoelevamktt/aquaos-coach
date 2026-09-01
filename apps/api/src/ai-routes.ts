@@ -1,12 +1,27 @@
 import type { FastifyInstance } from "fastify";
-import type { ManagedStore } from "./managed-store.js";
+import { z } from "zod";
+import type {
+  ComposedBlock,
+  PlanningAthleteContext,
+  PlanningRequest,
+  RkfPhaseId,
+  RuleAudit,
+  RkfPrescription,
+  SkillCode,
+  ZoneCode,
+} from "@natacao/domain";
+import { decideAdaptation, generatePrescription, PHASES, SKILLS } from "@natacao/domain";
+import type { ManagedRecord, ManagedStore } from "./managed-store.js";
+import { calendarDateSchema } from "./date-schema.js";
+import { loadRkfLibrary } from "./rkf-library.js";
 import { getSession, roleAllows, sessionToken } from "./auth.js";
+import { coachLocalDate, athleteReadiness } from "./coach-briefing-routes.js";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
-const LLM_BASE_URL = process.env.LLM_BASE_URL ?? "https://api.elevamkt.digital/v1";
+export const LLM_BASE_URL = process.env.LLM_BASE_URL ?? "https://api.elevamkt.digital/v1";
 const LLM_API_KEY = process.env.LLM_API_KEY ?? "";
-const LLM_MODEL = process.env.LLM_MODEL ?? "auto/best-chat";
+export const LLM_MODEL = process.env.LLM_MODEL ?? "auto/best-chat";
 let statusCache: { checkedAt: number; available: boolean; reason?: string } | undefined;
 
 function esc(value: unknown): string {
@@ -186,7 +201,7 @@ REGRAS:
 6. Formate respostas curtas e escaneáveis: use listas quando houver vários itens, negrito para destaques via **texto**.
 7. Você pode falar de qualquer tema da plataforma: atletas, prontidão corporal, treinos, biblioteca, temporadas, competições, índices, vídeos, habilidades técnicas, metas, volumes, alertas, conectores, comissão, grupos, zonas e configurações.`;
 
-async function callLLm(messages: Array<{ role: string; content: string }>): Promise<string> {
+export async function callLLm(messages: Array<{ role: string; content: string }>): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
@@ -257,6 +272,519 @@ async function inspectLlmAvailability() {
   }
 }
 
+// === POST /api/v1/ai/generate-workout — motor RKF determinístico por atleta ===
+
+export type GeneratedWorkoutStepKind = "warmup" | "main" | "recovery" | "cooldown" | "technical";
+
+export type GeneratedWorkoutStep = {
+  id: string;
+  order: number;
+  kind: GeneratedWorkoutStepKind;
+  repetitions: number;
+  distanceMeters?: number;
+  stroke: "freestyle" | "backstroke" | "breaststroke" | "butterfly" | "individual_medley" | "mixed" | "drill";
+  targetType: "pace" | "heart_rate" | "rpe" | "technique" | "free";
+  targetValue?: string;
+  intervalSeconds?: number;
+  equipment: string[];
+  notes?: string;
+};
+
+export type GeneratedWorkoutBlock = {
+  id: string;
+  name: string;
+  order: number;
+  repeatCount: number;
+  steps: GeneratedWorkoutStep[];
+};
+
+export type GenerateWorkoutSuggestion = {
+  athleteId: string;
+  athleteIds?: string[];
+  athleteName: string;
+  readiness: number;
+  status: "PRONTO" | "REVISAR" | "AGUARDAR_TREINADOR";
+  adaptation: { class: string; volumeFactor: number; adaptedVolumeM: number } | null;
+  workout: {
+    title: string;
+    scheduledDate: string;
+    objective: string;
+    sportContext: "pool";
+    poolId?: string;
+    blocks: Array<{
+      id: string;
+      name: string;
+      order: number;
+      repeatCount: number;
+      steps: Array<{
+        id: string;
+        order: number;
+        kind: GeneratedWorkoutStepKind;
+        repetitions: number;
+        distanceMeters?: number;
+        stroke: "freestyle" | "backstroke" | "breaststroke" | "butterfly" | "individual_medley" | "mixed" | "drill";
+        targetType: "pace" | "heart_rate" | "rpe" | "technique" | "free";
+        targetValue?: string;
+        intervalSeconds?: number;
+        equipment: string[];
+        notes?: string;
+      }>;
+    }>;
+  };
+  publish: { targetType: "team" | "group" | "athlete"; targetId: string };
+  engine: {
+    status: "PRONTO" | "REVISAR";
+    pipeline: { eligible: number; scored: number; selected: string };
+    primaryZone: ZoneCode;
+    secondaryZone: ZoneCode | null;
+    totalVolumeM: number;
+    zoneAllocation: RkfPrescription["zoneAllocation"] | null;
+    source: RkfPrescription["source"] | null;
+    rationale: string[];
+    score: number | null;
+    audit: RuleAudit | null;
+  };
+  narrative: string;
+  llmUsed: boolean;
+};
+
+export type GenerateWorkoutRequest = {
+  athleteIds?: string[];
+  date?: string;
+  phase?: RkfPhaseId;
+  primaryZone?: "A1" | "A2" | "A3" | "AN1" | "AN2" | "VALAT";
+  targetVolumeM?: number;
+  objective?: string;
+  skillEmphasis?: string[];
+  useNarrativeLlm?: boolean;
+};
+
+export type GenerateWorkoutResponse = {
+  status: "PRONTO" | "REVISAR";
+  date: string;
+  phase: RkfPhaseId;
+  suggestions: Array<Omit<GenerateWorkoutSuggestion, "readiness"> & { readiness: number }>;
+  warnings: string[];
+};
+
+type GenerateOutcome = { ok: true; body: GenerateWorkoutResponse } | { ok: false; status: number; payload: unknown };
+
+const PHASE_IDS = PHASES.map((phase) => phase.id) as [RkfPhaseId, ...RkfPhaseId[]];
+
+const generateWorkoutSchema = z.object({
+  athleteIds: z.array(z.string().trim().min(1)).max(60).optional(),
+  date: calendarDateSchema.optional(),
+  phase: z.enum(PHASE_IDS).optional(),
+  primaryZone: z.enum(["A1", "A2", "A3", "AN1", "AN2", "VALAT"]).optional(),
+  targetVolumeM: z.number().int().multipleOf(10).min(2000).optional(),
+  objective: z.string().trim().min(1).max(300).optional(),
+  skillEmphasis: z.array(z.string().trim().min(1).max(40)).max(14).optional(),
+  useNarrativeLlm: z.boolean().default(true),
+});
+
+const NARRATIVE_SYSTEM_PROMPT = "Você é o assistente RKF. Recebe prescrições estruturadas do motor RKF e escreve 2-3 frases de briefing para o treinador. NUNCA altere números, zonas ou volumes — apenas explique o porquê e destaques de cada bloco.";
+
+const round10 = (value: number) => Math.round(value / 10) * 10;
+
+function dayDiff(from: string, to: string) {
+  return Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000);
+}
+
+function parseEventMeters(athlete: ManagedRecord): number | undefined {
+  const match = /(\d{2,4})\s*m/i.exec(`${String(athlete.goalEvent ?? "")} ${String(athlete.primaryEvent ?? "")}`);
+  const value = Number(match?.[1]);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/** specialty RKF: ≤100 m/estilo curto → velocidade; 200–400 → meio-fundo; 800/1500 → fundo. */
+function specialtyFor(athlete: ManagedRecord): "velocidade" | "meio_fundo" | "fundo" {
+  const meters = parseEventMeters(athlete);
+  if (meters !== undefined) {
+    if (meters <= 100) return "velocidade";
+    if (meters <= 400) return "meio_fundo";
+    return "fundo";
+  }
+  const event = `${String(athlete.goalEvent ?? "")} ${String(athlete.stroke ?? "")}`.toLowerCase();
+  if (/\b(50|100)\b/.test(event) && !/\b(200|400|800|1500)\b/.test(event)) return "velocidade";
+  return "meio_fundo";
+}
+
+function poolLengthFor(store: ManagedStore, organizationId: string): 25 | 50 {
+  const program = store.list("settings").find((item) => item.id === "program" && String(item.organizationId ?? "org-demo") === organizationId)
+    ?? store.list("settings").find((item) => item.id === "program");
+  const primaryPool = String(program?.primaryPool ?? "");
+  if (/(?:^|\D)25(?:\D|$)/.test(primaryPool)) return 25;
+  return 50;
+}
+
+function athleteAge(athlete: ManagedRecord): { age: number; assumed: boolean } {
+  const birthDate = String(athlete.birthDate ?? "");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
+    const birth = new Date(`${birthDate}T12:00:00Z`);
+    if (Number.isFinite(birth.getTime())) {
+      const reference = new Date();
+      let age = reference.getUTCFullYear() - birth.getUTCFullYear();
+      const monthDiff = reference.getUTCMonth() - birth.getUTCMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && reference.getUTCDate() < birth.getUTCDate())) age -= 1;
+      if (age >= 8 && age <= 120) return { age, assumed: false };
+    }
+  }
+  return { age: 18, assumed: true }; // faixa 16–22 coerente com a base; warning registrado
+}
+
+/** Fase default: taper se a próxima competição está próxima; senão progressão pela temporada ativa; BASE como piso. */
+function derivePhase(store: ManagedStore, organizationId: string, today: string): RkfPhaseId {
+  const meets = store.list("meets")
+    .filter((meet) => String(meet.organizationId ?? "org-demo") === organizationId && /^\d{4}-\d{2}-\d{2}$/.test(String(meet.startsOn ?? "")) && String(meet.startsOn) >= today)
+    .sort((a, b) => String(a.startsOn).localeCompare(String(b.startsOn)));
+  const daysUntilMeet = meets.length ? dayDiff(today, String(meets[0]!.startsOn)) : null;
+  if (daysUntilMeet !== null && daysUntilMeet <= 14) return "TAPER";
+  const season = store.list("seasons").find((item) => String(item.organizationId ?? "org-demo") === organizationId && item.status === "active");
+  if (season && /^\d{4}-\d{2}-\d{2}$/.test(String(season.startsOn ?? "")) && /^\d{4}-\d{2}-\d{2}$/.test(String(season.endsOn ?? ""))) {
+    const total = Math.max(1, dayDiff(String(season.startsOn), String(season.endsOn)));
+    const elapsed = dayDiff(String(season.startsOn), today);
+    const fraction = elapsed <= 0 ? 0 : elapsed / total;
+    if (fraction < 0.15) return "ADAPTACAO";
+    if (fraction < 0.4) return "BASE";
+    if (fraction < 0.65) return "DESENVOLVIMENTO";
+    if (fraction < 0.85) return "ESPECIFICO";
+    return "TAPER";
+  }
+  if (daysUntilMeet !== null && daysUntilMeet <= 42) return "ESPECIFICO";
+  return "BASE";
+}
+
+function defaultTargetVolumeM(athlete: ManagedRecord): number {
+  const weekly = Number(athlete.weeklyDistance);
+  const base = Number.isFinite(weekly) && weekly > 0 ? round10(weekly / 5) : 2000;
+  return Math.min(6000, Math.max(2000, base));
+}
+
+/** Série principal > 800 m vira séries de ~200 m preservando o volume exato do bloco. */
+function splitMainSeries(volumeM: number): Array<{ repetitions: number; distanceMeters: number }> {
+  if (volumeM <= 800) return [{ repetitions: 1, distanceMeters: volumeM }];
+  const repetitions = Math.max(2, Math.round(volumeM / 200));
+  const seriesDistance = Math.floor(volumeM / repetitions / 25) * 25;
+  const remainder = volumeM - seriesDistance * (repetitions - 1);
+  if (seriesDistance < 25 || remainder < 25) return [{ repetitions: 1, distanceMeters: volumeM }];
+  if (remainder === seriesDistance) return [{ repetitions, distanceMeters: seriesDistance }];
+  return [
+    { repetitions: repetitions - 1, distanceMeters: seriesDistance },
+    { repetitions: 1, distanceMeters: remainder },
+  ];
+}
+
+function componentKind(component: string): GeneratedWorkoutStepKind {
+  const normalized = component.toLocaleLowerCase("pt-BR");
+  if (normalized.includes("aquecimento")) return "warmup";
+  if (normalized.includes("principal")) return "main";
+  if (normalized.includes("regenerativo")) return "cooldown";
+  return "technical";
+}
+
+function mapPrescriptionBlocks(athleteId: string, blocks: readonly ComposedBlock[]) {
+  return blocks.map((block) => {
+    const kind = componentKind(block.component);
+    const series = block.component === "SÉRIE PRINCIPAL" && block.volumeM > 800
+      ? splitMainSeries(block.volumeM)
+      : [{ repetitions: 1, distanceMeters: block.volumeM }];
+    return {
+      id: `${athleteId}-block-${block.order}`,
+      name: block.component,
+      order: block.order,
+      repeatCount: 1,
+      steps: series.map((series, index) => ({
+        id: `${athleteId}-block-${block.order}-step-${index + 1}`,
+        order: index + 1,
+        kind,
+        repetitions: series.repetitions,
+        distanceMeters: series.distanceMeters,
+        stroke: "mixed" as const,
+        targetType: "pace" as const,
+        targetValue: block.zone,
+        equipment: [...block.materials],
+        notes: block.prescriptionText,
+      })),
+    };
+  });
+}
+
+/** Estrutura mínima de segurança quando o motor não consegue compor (ex.: volume adaptado baixo). */
+function fallbackPrescription(athleteId: string, zone: ZoneCode, volumeM: number): { title: string; blocks: ComposedBlock[]; rationale: string[] } {
+  const warmup = Math.max(100, round10(volumeM * 0.15));
+  const cooldown = Math.max(100, round10(volumeM * 0.15));
+  const main = Math.max(0, volumeM - warmup - cooldown);
+  const blocks: ComposedBlock[] = [
+    { order: 1, component: "AQUECIMENTO", volumeM: warmup, zone: "A1", prescriptionText: `${warmup} m nado leve progressivo`, materials: [], skills: [] },
+    { order: 2, component: "SÉRIE PRINCIPAL", volumeM: main, zone, prescriptionText: `${main} m em ${zone} — estrutura mínima de segurança`, materials: [], skills: [] },
+    { order: 3, component: "REGENERATIVO", volumeM: cooldown, zone: "A1", prescriptionText: `${cooldown} m regenerativo técnico`, materials: [], skills: [] },
+  ];
+  return {
+    title: `Sessão mínima ${zone} (aguardando treinador)`,
+    blocks,
+    rationale: [`Volume-alvo insuficiente para a estrutura RKF completa; gerada estrutura mínima de ${volumeM} m em ${zone}. Decisão final do treinador obrigatória.`],
+  };
+}
+
+function parseBriefings(raw: string): Map<string, string> | null {
+  const match = /\{[\s\S]*\}/.exec(raw);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[0]) as { briefings?: Array<{ athleteId?: unknown; narrative?: unknown }> };
+    if (!Array.isArray(parsed.briefings)) return null;
+    const map = new Map<string, string>();
+    for (const item of parsed.briefings) {
+      if (typeof item.athleteId === "string" && typeof item.narrative === "string" && item.narrative.trim()) map.set(item.athleteId, item.narrative.trim());
+    }
+    return map.size ? map : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Gera sugestões determinísticas por atleta (decideAdaptation → generatePrescription
+ * → mapeamento para o workoutSchema) e, opcionalmente, UM briefing de LLM para o
+ * grupo inteiro. Nada é publicado — a resposta é apenas payload para a UI.
+ */
+export async function generateWorkoutSuggestions(
+  store: ManagedStore,
+  organizationId: string,
+  body: GenerateWorkoutRequest,
+): Promise<GenerateOutcome> {
+  const warnings: string[] = [];
+  const inOrg = (record: ManagedRecord) => String(record.organizationId ?? "org-demo") === organizationId;
+  const allAthletes = store.list("athletes").filter(inOrg);
+  const requestedIds = body.athleteIds?.length ? [...new Set(body.athleteIds)] : allAthletes.filter((athlete) => String(athlete.status ?? "active") === "active").map((athlete) => String(athlete.id));
+  const resolved = requestedIds
+    .map((id) => store.get("athletes", id))
+    .filter((athlete): athlete is ManagedRecord => Boolean(athlete) && String(athlete?.organizationId ?? "org-demo") === organizationId);
+  const missing = requestedIds.filter((id) => !resolved.some((athlete) => athlete.id === id));
+  if (missing.length) warnings.push(`Atletas não encontrados na organização: ${missing.join(", ")}.`);
+  if (!resolved.length) {
+    return { ok: false, status: 404, payload: { error: "Nenhum atleta válido encontrado para gerar sugestões", details: { missing: requestedIds }, warnings } };
+  }
+
+  const date = body.date ?? coachLocalDate();
+  const phase = body.phase ?? derivePhase(store, organizationId, date);
+  const objective = body.objective ?? "Sessão de qualidade com foco em ritmo";
+  const requestedZone = body.primaryZone ?? "A2";
+  const library = loadRkfLibrary()?.sessions ?? [];
+  const poolLengthM = poolLengthFor(store, organizationId);
+  const skillEmphasis = (body.skillEmphasis ?? [])
+    .map((skill) => skill.trim().toUpperCase())
+    .filter((skill): skill is SkillCode => (SKILLS as readonly { code: string }[]).some((candidate) => candidate.code === skill));
+
+  type Draft = {
+    athleteId: string;
+    athleteName: string;
+    readiness: number;
+    suggestionStatus: "PRONTO" | "REVISAR" | "AGUARDAR_TREINADOR";
+    adaptation: { class: string; volumeFactor: number; adaptedVolumeM: number };
+    title: string;
+    blocks: ReturnType<typeof mapPrescriptionBlocks>;
+    engine: GenerateWorkoutSuggestion["engine"];
+    rationale: string[];
+  };
+
+  const drafts: Draft[] = [];
+  for (const athlete of resolved) {
+    const athleteId = String(athlete.id);
+    const athleteName = String(athlete.name ?? athlete.id);
+    // 1) Contexto real (age/specialty/developmentLevel/piscina)
+    const eventMeters = parseEventMeters(athlete);
+    const birthDate = String(athlete.birthDate ?? "");
+    let age = 18;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
+      const birth = new Date(`${birthDate}T12:00:00Z`);
+      if (Number.isFinite(birth.getTime())) {
+        const reference = new Date();
+        let computed = reference.getUTCFullYear() - birth.getUTCFullYear();
+        const monthDiff = reference.getUTCMonth() - birth.getUTCMonth();
+        if (monthDiff < 0 || (monthDiff === 0 && reference.getUTCDate() < birth.getUTCDate())) computed -= 1;
+        if (computed >= 8 && computed <= 120) age = computed;
+        else warnings.push(`Idade de ${athleteName} estimada em 18 anos (birthDate inválido).`);
+      } else warnings.push(`Idade de ${athleteName} estimada em 18 anos (birthDate ausente).`);
+    } else warnings.push(`Idade de ${athleteName} estimada em 18 anos (birthDate ausente).`);
+    const specialty = specialtyFor(athlete);
+    const developmentLevel = String(athlete.level ?? "").trim().toLowerCase() === "base" ? "formacao" : "rendimento";
+    // 2) Readiness real
+    const readiness = athleteReadiness(store, athlete) ?? 70;
+    // 3) Adaptação por readiness (RKF seção 18)
+    const requestedVolume = body.targetVolumeM ?? defaultTargetVolumeM(athlete);
+    const decision = decideAdaptation({ readiness, prescribedVolumeM: requestedVolume, primaryZone: requestedZone });
+    const awaitingCoach = decision.status === "AGUARDAR_TREINADOR";
+    const athleteContext: PlanningAthleteContext = {
+      athleteId: athlete.id,
+      age,
+      developmentLevel,
+      specialty,
+      poolLengthM,
+      ...(eventMeters !== undefined ? { eventMeters } : {}),
+    };
+    const planning: PlanningRequest = {
+      phase,
+      objective,
+      primaryZone: decision.primaryZone,
+      targetVolumeM: decision.adaptedVolumeM,
+      rdcMarker: false,
+      readiness,
+      ...(skillEmphasis.length ? { skillEmphasis } : {}),
+    };
+    if (awaitingCoach) {
+      warnings.push(`Readiness de ${athleteName} (${readiness}) bloqueia prescrição automática: sugestão marcada como AGUARDAR_TREINADOR (volume fator ${decision.volumeFactor}, zona ${decision.primaryZone}).`);
+    }
+    try {
+      const result = generatePrescription(athleteContext, planning, library);
+      const prescription = result.prescription;
+      if (!prescription) throw new Error(result.audit.hardFailures[0] ?? "Motor não retornou prescrição");
+      drafts.push({
+        athleteId: athlete.id,
+        athleteName,
+        readiness,
+        suggestionStatus: awaitingCoach ? "AGUARDAR_TREINADOR" : result.status,
+        adaptation: { class: decision.class, volumeFactor: decision.volumeFactor, adaptedVolumeM: decision.adaptedVolumeM },
+        title: prescription.title,
+        blocks: mapPrescriptionBlocks(athlete.id, prescription.blocks),
+        engine: {
+          status: result.status,
+          pipeline: result.pipeline,
+          primaryZone: prescription.primaryZone,
+          secondaryZone: prescription.secondaryZone,
+          totalVolumeM: prescription.totalVolumeM,
+          zoneAllocation: prescription.zoneAllocation,
+          source: prescription.source,
+          rationale: prescription.rationale,
+          score: prescription.score ?? null,
+          audit: result.audit,
+        },
+        rationale: prescription.rationale,
+      });
+      if (result.status === "REVISAR") warnings.push(`Motor retornou REVISAR para ${athleteName}: ${result.audit.hardFailures.join(" ") || "validação de sessão pendente"}.`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "Falha ao compor prescrição";
+      const fallback = fallbackPrescription(String(athlete.id), decision.primaryZone, decision.adaptedVolumeM);
+      warnings.push(`${athleteName}: estrutura RKF indisponível para ${decision.adaptedVolumeM} m (${reason}); prescrição mínima de segurança gerada.`);
+      drafts.push({
+        athleteId: athlete.id,
+        athleteName,
+        readiness,
+        suggestionStatus: awaitingCoach ? "AGUARDAR_TREINADOR" : "REVISAR",
+        adaptation: { class: decision.class, volumeFactor: decision.volumeFactor, adaptedVolumeM: decision.adaptedVolumeM },
+        title: `Sessão ${decision.primaryZone} mínima`,
+        blocks: mapPrescriptionBlocks(athlete.id, fallback.blocks),
+        engine: {
+          status: "REVISAR",
+          pipeline: { eligible: 0, scored: 0, selected: "FALLBACK_MINIMO" },
+          primaryZone: decision.primaryZone,
+          secondaryZone: null,
+          totalVolumeM: decision.adaptedVolumeM,
+          zoneAllocation: null,
+          source: null,
+          rationale: fallback.rationale,
+          score: null,
+          audit: null,
+        },
+        rationale: fallback.rationale,
+      });
+    }
+  }
+
+  // --- Montagem: dedup por assinatura da prescrição + narrativa opcional do LLM ---
+  // --- Montagem: dedup (todos idênticos → 1 sugestão team) + narrativa opcional do LLM ---
+  const signatureOf = (draft: Draft) => JSON.stringify({
+    title: draft.title,
+    totalVolumeM: draft.engine.totalVolumeM,
+    primaryZone: draft.engine.primaryZone,
+    blocks: draft.blocks.map((block) => ({
+      name: block.name,
+      steps: block.steps.map((step) => [step.repetitions, step.distanceMeters ?? 0, step.targetValue ?? ""]),
+    })),
+  });
+  const allIdentical = drafts.length > 1 && drafts.every((draft) => signatureOf(draft) === signatureOf(drafts[0]!));
+  const suggestions: GenerateWorkoutSuggestion[] = allIdentical
+    ? (() => {
+      const representative = drafts[0]!;
+      warnings.push(`Prescrição idêntica para ${drafts.length} atletas: retornada 1 sugestão com publish.team (${organizationId}).`);
+      return [{
+        athleteId: representative.athleteId,
+        athleteIds: drafts.map((item) => item.athleteId),
+        athleteName: drafts.map((item) => item.athleteName).join(", "),
+        readiness: representative.readiness,
+        status: representative.suggestionStatus,
+        adaptation: representative.adaptation,
+        workout: {
+          title: representative.title,
+          scheduledDate: date,
+          objective,
+          sportContext: "pool" as const,
+          blocks: representative.blocks,
+        },
+        publish: { targetType: "team" as const, targetId: organizationId },
+        engine: representative.engine,
+        narrative: representative.rationale.join(" "),
+        llmUsed: false,
+      }];
+    })()
+    : drafts.map((draft) => ({
+      athleteId: draft.athleteId,
+      athleteName: draft.athleteName,
+      readiness: draft.readiness,
+      status: draft.suggestionStatus,
+      adaptation: draft.adaptation,
+      workout: {
+        title: draft.title,
+        scheduledDate: date,
+        objective,
+        sportContext: "pool" as const,
+        blocks: draft.blocks,
+      },
+      publish: { targetType: "athlete" as const, targetId: draft.athleteId },
+      engine: draft.engine,
+      narrative: draft.rationale.join(" "),
+      llmUsed: false,
+    }));
+  const overallStatus: GenerateWorkoutResponse["status"] = suggestions.every((suggestion) => suggestion.status === "PRONTO")
+    ? "PRONTO"
+    : "REVISAR";
+
+  let narratives: Map<string, string> | null = null;
+  // Chave checada em tempo de requisição para que os testes (sem LLM_API_KEY) sejam determinísticos.
+  if (body.useNarrativeLlm !== false && Boolean(process.env.LLM_API_KEY) && suggestions.length) {
+    try {
+      const narrativeInput = {
+        fase: phase,
+        data: date,
+        briefings: suggestions.map((suggestion) => ({
+          athleteId: suggestion.athleteId,
+          atleta: suggestion.athleteName,
+          readiness: suggestion.readiness,
+          zona: suggestion.engine.primaryZone,
+          volumeM: suggestion.engine.totalVolumeM,
+          blocos: suggestion.engine.rationale,
+        })),
+      };
+      const answer = await callLLm([
+        { role: "system", content: NARRATIVE_SYSTEM_PROMPT },
+        { role: "user", content: `Prescrições:\n${JSON.stringify(narrativeInput)}\nResponda somente com JSON {"briefings":[{"athleteId":"...","narrative":"2-3 frases em pt-BR"}]}.` },
+      ]);
+      narratives = parseBriefings(answer);
+    } catch {
+      narratives = null;
+    }
+  }
+  for (const suggestion of suggestions) {
+    const narrative = narratives?.get(suggestion.athleteId);
+    if (narrative) {
+      suggestion.narrative = narrative;
+      suggestion.llmUsed = true;
+    } else {
+      suggestion.narrative = suggestion.engine.rationale.join(" ");
+    }
+  }
+  return { ok: true, body: { status: overallStatus, date, phase, suggestions, warnings } };
+}
+
 export function registerAiRoutes(app: FastifyInstance, store: ManagedStore) {
   app.get("/api/v1/ai/status", async (request, reply) => {
     const user = await getSession(sessionToken(request));
@@ -290,5 +818,15 @@ export function registerAiRoutes(app: FastifyInstance, store: ManagedStore) {
       const message = error instanceof Error ? error.message : "Falha ao consultar o modelo";
       return reply.code(502).send({ error: `Não consegui responder agora: ${message}` });
     }
+  });
+
+  app.post("/api/v1/ai/generate-workout", async (request, reply) => {
+    const user = await getSession(sessionToken(request));
+    if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação exclusiva da comissão técnica" : "Autenticação necessária" });
+    const parsed = generateWorkoutSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "Requisição de geração inválida", details: parsed.error.flatten() });
+    const outcome = await generateWorkoutSuggestions(store, user!.organizationId, parsed.data);
+    if (!outcome.ok) return reply.code(outcome.status).send(outcome.payload);
+    return reply.send(outcome.body);
   });
 }

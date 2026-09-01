@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import React from "react";
-import { Today } from "../views-primary";
+import { Today, type Briefing } from "../views-primary";
 import { apiRequest } from "../api";
 
 vi.mock("../api", () => ({
@@ -23,10 +23,27 @@ function mockAthletes(count: number) {
   };
 }
 
+function mockBriefing(overrides: Partial<Briefing> = {}): Briefing {
+  return {
+    date: "2026-08-28",
+    nextMeet: null,
+    todaySessions: [
+      { id: "s1", title: "Ritmo de prova · 200 Livre", date: "2026-08-28", volumeMeters: 5200, zone: "AN2", blocksCount: 3, time: "07:30", targetType: "team", targetId: "org-demo" },
+      { id: "s2", title: "Força · membros inferiores", date: "2026-08-28", volumeMeters: 4200, zone: "FORÇA", blocksCount: 2, time: "16:00", targetType: "group", targetId: "elite" },
+    ],
+    metrics: { activeAthletes: 0, readyAthletes: 0, attentionAthletes: 0, averageReadiness: null, checkinsToday: 3, adherencePercent: 88, pendingVideos: 0, pendingInvitations: 0, expiringInvitations: 0, prescriptionsAwaitingApproval: 0 },
+    load: { acute: null, chronic: null, acwr: null, weeklyHistory: [], source: "none" },
+    insights: [],
+    perAthlete: [],
+    ...overrides,
+  };
+}
+
 function renderToday() {
   return render(
     <Today
       onCreate={() => undefined}
+      onAiWorkout={() => undefined}
       onNavigate={() => undefined}
       onAthlete={() => undefined}
       onNotify={() => undefined}
@@ -34,10 +51,10 @@ function renderToday() {
   );
 }
 
-function apiRoutes(athletesData: { data: Array<Record<string, unknown>> }) {
+function apiRoutes(athletesData: { data: Array<Record<string, unknown>> }, briefing: Briefing = mockBriefing()) {
   mockedApi.mockImplementation((path: string) => {
     if (path === "/api/v1/athletes") return Promise.resolve(athletesData);
-    if (path === "/api/v1/manage/meets") return Promise.resolve({ data: [] });
+    if (path === "/api/v1/coach/briefing") return Promise.resolve(briefing);
     return Promise.reject(new Error(`rota não mockada: ${path}`));
   });
 }
@@ -47,12 +64,12 @@ describe("Today", () => {
     vi.resetAllMocks();
   });
 
-  it("contagem no subtítulo 'Na água hoje' igual ao length do array do mock", async () => {
+  it("subtítulo 'Na água hoje' reflete o length de todaySessions do briefing", async () => {
     apiRoutes(mockAthletes(6));
     renderToday();
 
-    const subtitle = await screen.findByText(/atletas · 5\.200 m · AN2/);
-    expect(subtitle).toHaveTextContent(/^6 atletas · 5\.200 m · AN2$/);
+    const subtitle = await screen.findByText(/2 sessões · 9\.400 m/);
+    expect(subtitle).toHaveTextContent(/^2 sessões · 9\.400 m · AN2$/);
   });
 
   it("mostra chip '+2 atletas' quando a lista tem 6 atletas (4 visíveis)", async () => {
@@ -66,12 +83,12 @@ describe("Today", () => {
     apiRoutes(mockAthletes(4));
     renderToday();
 
-    await screen.findByText(/4 atletas · 5\.200 m · AN2/);
+    await screen.findByText(/2 sessões · 9\.400 m/);
     expect(screen.queryByText(/\+\d+ atletas/)).not.toBeInTheDocument();
   });
 
-  it("métrica 'ATLETAS ATIVOS' reflete o total do plantel carregado", async () => {
-    apiRoutes(mockAthletes(5));
+  it("métrica 'ATLETAS ATIVOS' reflete briefing.metrics.activeAthletes", async () => {
+    apiRoutes(mockAthletes(5), mockBriefing({ metrics: { ...mockBriefing().metrics, activeAthletes: 5 } }));
     renderToday();
 
     expect(await screen.findByText("5 no plantel")).toBeInTheDocument();
@@ -83,5 +100,21 @@ describe("Today", () => {
 
     expect(await screen.findByText("28.600 m")).toBeInTheDocument();
     expect(await screen.findByText("27.100 m")).toBeInTheDocument();
+  });
+
+  it("sem sessões publicadas mostra estado vazio com botão 'Gerar com IA'", async () => {
+    apiRoutes(mockAthletes(4), mockBriefing({ todaySessions: [] }));
+    renderToday();
+
+    expect(await screen.findByText("Nenhuma sessão publicada para hoje")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Gerar com IA/ })).toBeInTheDocument();
+  });
+
+  it("carga sem execuções (source 'none') não inventa números", async () => {
+    apiRoutes(mockAthletes(4), mockBriefing({ load: { acute: null, chronic: null, acwr: null, weeklyHistory: [], source: "none" } }));
+    renderToday();
+
+    expect(await screen.findByText("Sem execuções registradas ainda")).toBeInTheDocument();
+    expect(screen.queryByText("ACWR")).not.toBeInTheDocument();
   });
 });
