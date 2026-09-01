@@ -149,7 +149,7 @@ export default function AthleteApp() {
     void loadAthleteData().catch((cause) => {
       setFeedback(cause instanceof Error ? cause.message : "Não foi possível carregar seus dados.");
     });
-  }, [authState]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authState, screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!publicScreens.includes(screen) && authState === "checking") {
     return <main className="athlete-phone light"><AthleteLoading label="Verificando sessão…" /></main>;

@@ -7,6 +7,10 @@ import type { ManagedRecord, ManagedStore } from "./managed-store.js";
 import type { DemoStore } from "./store.js";
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+const dateSchema = z.string().regex(datePattern).refine((value) => {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}, "Data inválida");
 const dateFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Sao_Paulo",
   year: "numeric",
@@ -33,6 +37,10 @@ async function requireAthlete(request: FastifyRequest, reply: FastifyReply) {
 
 function localDate(value = new Date()) {
   return dateFormatter.format(value);
+}
+
+function validDate(value: unknown): value is string {
+  return dateSchema.safeParse(value).success;
 }
 
 function dateRange(date: string) {
@@ -164,6 +172,24 @@ function prescriptionTargetsAthlete(store: ManagedStore, prescription: ManagedRe
   return groupIds.includes(String(prescription.targetId));
 }
 
+function executionMatches(
+  execution: ManagedRecord,
+  prescriptionId: string | undefined,
+  sessionId: string,
+  date: string,
+) {
+  const executionPrescriptionId = typeof execution.prescriptionId === "string"
+    ? execution.prescriptionId
+    : undefined;
+  const executionSessionId = typeof execution.sessionId === "string"
+    ? execution.sessionId
+    : undefined;
+  if (executionPrescriptionId || executionSessionId) {
+    return executionPrescriptionId === prescriptionId || executionSessionId === sessionId;
+  }
+  return dateOf(execution) === date;
+}
+
 function demoPrescriptionForAthlete(demo: DemoStore, athlete: ManagedRecord, date: string) {
   const demoAthlete = demo.athletes.find((item) =>
     item.email?.toLowerCase() === String(athlete.email ?? "").toLowerCase()
@@ -197,17 +223,28 @@ function aggregate(store: ManagedStore, demo: DemoStore, athleteId: string, orga
   const checkIn = store.list("athleteResponses").find((item) => own(item) && item.date === date) ?? null;
   const executions = store.list("sessionExecutions").filter(own);
   const weekExecutions = executions.filter(inWeek);
+  const assignmentIds = new Set<string>();
   const prescribedWorkouts = store.list("prescriptions")
     .filter((item) =>
       item.organizationId === organizationId
       && item.status === "PUBLISHED"
       && prescriptionTargetsAthlete(store, item, athlete))
+    .sort((left, right) => String(
+      right.publishedAt ?? right.approvedAt ?? right.updatedAt,
+    ).localeCompare(String(
+      left.publishedAt ?? left.approvedAt ?? left.updatedAt,
+    )))
     .map((prescription) => ({
       prescription,
       workout: store.get("workouts", String(prescription.workoutId ?? prescription.workoutTemplateId ?? "")),
     }))
     .filter((assignment): assignment is { prescription: ManagedRecord; workout: ManagedRecord } =>
-      Boolean(assignment.workout?.status === "published"));
+      Boolean(assignment.workout?.status === "published"))
+    .filter(({ workout }) => {
+      if (assignmentIds.has(workout.id)) return false;
+      assignmentIds.add(workout.id);
+      return true;
+    });
   const weekAssignments = prescribedWorkouts.filter(({ workout }) => inWeek(workout));
   const todayAssignment = prescribedWorkouts.find(({ workout }) => dateOf(workout) === date);
   const demoAssignment = todayAssignment ? undefined : demoPrescriptionForAthlete(demo, athlete, date);
@@ -216,7 +253,10 @@ function aggregate(store: ManagedStore, demo: DemoStore, athleteId: string, orga
     : demoAssignment
       ? mapWorkout(demoAssignment.workout, demoAssignment.prescription.id, date)
       : null;
-  const completedToday = executions.find((item) => item.date === date || String(item.startedAt ?? "").startsWith(date));
+  const completedToday = session
+    ? executions.find((item) =>
+      executionMatches(item, session.prescriptionId, session.id, date))
+    : executions.find((item) => dateOf(item) === date);
   const plannedMeters = weekAssignments.reduce((sum, { workout }) => sum + Number(workout.distanceMeters ?? 0), 0)
     || (session ? session.volumeMeters * Math.max(1, Number((athlete.availability as { sessionsPerWeek?: number } | undefined)?.sessionsPerWeek ?? 1)) : 0);
   const completedMeters = weekExecutions.reduce((sum, item) => sum + Number(item.distanceMeters ?? 0), 0);
@@ -230,17 +270,17 @@ function aggregate(store: ManagedStore, demo: DemoStore, athleteId: string, orga
     meet.id === athleteTargetMeet || meet.name === athleteTargetMeet)
     ?? (!athleteTargetMeet
       ? meetRecords
-        .filter((meet) => datePattern.test(String(meet.startsOn ?? "")) && String(meet.startsOn) >= date)
+        .filter((meet) => validDate(meet.startsOn) && meet.startsOn >= date)
         .sort((left, right) => String(left.startsOn).localeCompare(String(right.startsOn)))[0]
       : undefined);
-  const targetDate = datePattern.test(String(athlete.meetDate ?? ""))
-    ? String(athlete.meetDate)
-    : datePattern.test(String(targetMeet?.startsOn ?? ""))
-      ? String(targetMeet?.startsOn)
+  const targetDate = validDate(athlete.meetDate)
+    ? athlete.meetDate
+    : validDate(targetMeet?.startsOn)
+      ? targetMeet.startsOn
       : undefined;
   const season = store.list("seasons").find((item) => item.organizationId === organizationId && item.status === "active");
-  const phaseStart = datePattern.test(String(season?.startsOn ?? "")) ? String(season?.startsOn) : range.start;
-  const phaseEnd = targetDate ?? (datePattern.test(String(season?.endsOn ?? "")) ? String(season?.endsOn) : range.end);
+  const phaseStart = validDate(season?.startsOn) ? season.startsOn : range.start;
+  const phaseEnd = targetDate ?? (validDate(season?.endsOn) ? season.endsOn : range.end);
   const elapsedWeeks = Math.max(0, Math.floor((new Date(`${date}T12:00:00Z`).getTime() - new Date(`${phaseStart}T12:00:00Z`).getTime()) / 604_800_000));
   const totalWeeks = Math.max(1, Math.ceil((new Date(`${phaseEnd}T12:00:00Z`).getTime() - new Date(`${phaseStart}T12:00:00Z`).getTime()) / 604_800_000));
   const meets = meetRecords.map((meet) => ({
@@ -260,9 +300,12 @@ function aggregate(store: ManagedStore, demo: DemoStore, athleteId: string, orga
     volumeMeters: Number(workout.distanceMeters ?? 0),
     zone: String(workout.zone ?? "A2"),
     completed: weekExecutions.some((execution) =>
-      execution.prescriptionId === prescription.id
-      || execution.sessionId === workout.id
-      || execution.date === dateOf(workout)),
+      executionMatches(
+        execution,
+        prescription.id,
+        workout.id,
+        dateOf(workout),
+      )),
   }));
   if (weekSessions.length === 0 && session && session.date >= range.start && session.date <= range.end) {
     weekSessions.push({
@@ -336,7 +379,7 @@ export function registerAthleteAppRoutes(app: FastifyInstance, store: ManagedSto
   app.get("/api/v1/athlete/app", async (request, reply) => {
     const user = await requireAthlete(request, reply);
     if (!user) return;
-    const query = z.object({ date: z.string().regex(datePattern).optional() }).safeParse(request.query);
+    const query = z.object({ date: dateSchema.optional() }).safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: "Data inválida" });
     const data = aggregate(store, demo, user.athleteId!, user.organizationId, query.data.date ?? localDate());
     if (!data) return reply.code(404).send({ error: "Perfil do atleta não encontrado" });
@@ -347,7 +390,7 @@ export function registerAthleteAppRoutes(app: FastifyInstance, store: ManagedSto
     const user = await requireAthlete(request, reply);
     if (!user) return;
     const parsed = z.object({
-      date: z.string().regex(datePattern).optional(),
+      date: dateSchema.optional(),
       psr: z.number().min(1).max(10),
       sleepHours: z.number().min(0).max(24).optional(),
       fatigue: z.number().min(0).max(10).optional(),
@@ -388,7 +431,7 @@ export function registerAthleteAppRoutes(app: FastifyInstance, store: ManagedSto
       splits: z.array(z.object({ distanceM: z.number().positive(), timeSeconds: z.number().positive() })).max(20).default([]),
     });
     const parsed = z.object({
-      date: z.string().regex(datePattern).optional(),
+      date: dateSchema.optional(),
       prescriptionId: z.string().trim().min(1).optional(),
       sessionId: z.string().trim().min(1).optional(),
       meetId: z.string().trim().min(1).optional(),
@@ -471,7 +514,7 @@ export function registerAthleteAppRoutes(app: FastifyInstance, store: ManagedSto
     const user = await requireAthlete(request, reply);
     if (!user) return;
     const parsed = z.object({
-      date: z.string().regex(datePattern).optional(),
+      date: dateSchema.optional(),
       prescriptionId: z.string().trim().min(1).optional(),
       sessionId: z.string().trim().min(1).optional(),
       startedAt: z.string().datetime().optional(),
@@ -486,7 +529,7 @@ export function registerAthleteAppRoutes(app: FastifyInstance, store: ManagedSto
     }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "Checkout inválido", details: parsed.error.flatten() });
     const endedAt = parsed.data.endedAt ?? new Date().toISOString();
-    const date = parsed.data.date ?? endedAt.slice(0, 10);
+    const date = parsed.data.date ?? localDate(new Date(endedAt));
     const startedAt = parsed.data.startedAt ?? new Date(new Date(endedAt).getTime() - parsed.data.durationMinutes * 60_000).toISOString();
     const externalId = `athlete-app:${user.athleteId}:${parsed.data.prescriptionId ?? parsed.data.sessionId ?? date}`;
     const existing = store.list("sessionExecutions").find((item) =>

@@ -39,6 +39,16 @@ describe("app do atleta", () => {
     expect(response.json().today.session.blocks.length).toBeGreaterThan(0);
   });
 
+  it("rejeita datas de calendário impossíveis", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/athlete/app?date=2026-99-99",
+      headers: { cookie: athleteCookie },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: "Data inválida" });
+  });
+
   it("ignora prescrições publicadas para outro atleta", async () => {
     const workout = store.create("workouts", {
       title: "Sessão de outro atleta",
@@ -60,6 +70,73 @@ describe("app do atleta", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().today.session.title).not.toBe("Sessão de outro atleta");
     expect(response.json().week.sessions).not.toContainEqual(expect.objectContaining({ id: workout.id }));
+  });
+
+  it("mantém somente a prescrição mais recente e conclui apenas a sessão correspondente", async () => {
+    const firstWorkout = store.create("workouts", {
+      title: "Primeira sessão",
+      date: "2026-09-02",
+      distanceMeters: 1000,
+      zone: "A2",
+      status: "published",
+      organizationId: "org-demo",
+    });
+    const secondWorkout = store.create("workouts", {
+      title: "Segunda sessão",
+      date: "2026-09-02",
+      distanceMeters: 2000,
+      zone: "AN1",
+      status: "published",
+      organizationId: "org-demo",
+    });
+    store.create("prescriptions", {
+      workoutId: firstWorkout.id,
+      targetType: "athlete",
+      targetId: "ana-souza",
+      status: "PUBLISHED",
+      publishedAt: "2026-09-01T10:00:00.000Z",
+      organizationId: "org-demo",
+    });
+    const activePrescription = store.create("prescriptions", {
+      workoutId: firstWorkout.id,
+      targetType: "athlete",
+      targetId: "ana-souza",
+      status: "PUBLISHED",
+      publishedAt: "2026-09-01T11:00:00.000Z",
+      organizationId: "org-demo",
+    });
+    store.create("prescriptions", {
+      workoutId: secondWorkout.id,
+      targetType: "athlete",
+      targetId: "ana-souza",
+      status: "PUBLISHED",
+      publishedAt: "2026-09-01T11:00:00.000Z",
+      organizationId: "org-demo",
+    });
+    store.create("sessionExecutions", {
+      athleteId: "ana-souza",
+      prescriptionId: activePrescription.id,
+      sessionId: firstWorkout.id,
+      date: "2026-09-02",
+      distanceMeters: 1000,
+      organizationId: "org-demo",
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/athlete/app?date=2026-09-02",
+      headers: { cookie: athleteCookie },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().week).toMatchObject({
+      plannedMeters: 3000,
+      plannedSessions: 2,
+    });
+    expect(response.json().week.sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: firstWorkout.id, completed: true }),
+      expect.objectContaining({ id: secondWorkout.id, completed: false }),
+    ]));
   });
 
   it("impede comissão técnica de usar o contexto do atleta", async () => {
@@ -131,5 +208,24 @@ describe("app do atleta", () => {
     expect(second.statusCode).toBe(200);
     expect(store.list("sessionExecutions").filter((item) => item.athleteId === "ana-souza" && item.date === "2026-09-01")).toHaveLength(1);
     expect(store.list("loadSnapshots").find((item) => item.externalId === "athlete-app:ana-souza:prescription-1")).toMatchObject({ value: 360 });
+  });
+
+  it("mantém checkout noturno no dia local de São Paulo", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/athlete/checkout",
+      headers: { cookie: athleteCookie },
+      payload: {
+        prescriptionId: "prescription-evening",
+        endedAt: "2026-09-02T01:30:00.000Z",
+        distanceMeters: 2000,
+        durationMinutes: 40,
+        pse: 5,
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      execution: { date: "2026-09-01" },
+    });
   });
 });
