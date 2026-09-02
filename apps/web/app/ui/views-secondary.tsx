@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Activity, ArrowRight, BarChart3, Calendar, Check, CircleCheck, Cloud, Database,
   Download, FileText, Film, Gauge, HeartPulse, Link2, Lock, MapPin, MoreHorizontal,
-  Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Sparkles, Target, Trophy,
+  Plus, Radio, RefreshCw, Search, Send, Settings, ShieldCheck, Sparkles, Target, Trophy,
   Upload, UserPlus, Users, Video, Watch, Waves,
 } from "lucide-react";
 import { athletes, connectors, hydrateAthlete, insights, meets, season, videos, zoneDistribution } from "./demo-data";
@@ -33,7 +33,7 @@ export function Season({ onMeet, onSettings, onCreateMeet, onNotify, liveVersion
 
 type VideoListItem = { id: string; athlete: string; initials: string; color: string; event: string; time: string; date: string; status: string; duration: string; markers: number; progress?: number; real?: boolean; url?: string; thumbnailUrl?: string };
 
-export function Videos({ onVideo, onNotify, liveVersion = 0 }: { onVideo: (id: string) => void; onNotify: (message: string) => void; liveVersion?: number }) {
+export function Videos({ onVideo, onLive, onNotify, liveVersion = 0 }: { onVideo: (id: string) => void; onLive: () => void; onNotify: (message: string) => void; liveVersion?: number }) {
   const [filter, setFilter] = useState("Todos");
   const [query, setQuery] = useState("");
   const [catalog, setCatalog] = useState<VideoListItem[]>(videos);
@@ -62,7 +62,7 @@ export function Videos({ onVideo, onNotify, liveVersion = 0 }: { onVideo: (id: s
       await loadVideos();
     } catch (error) { onNotify(error instanceof Error ? error.message : "Falha ao enviar vídeo"); }
   };
-  return <><PageTitle kicker="ANÁLISE TÉCNICA" title="Vídeos de prova e treino" subtitle="Movimento, ciclos e evidências técnicas sincronizados ao vídeo real."><button className="secondary-button" onClick={() => onNotify("Modo deck aberto: câmera, cronômetro e registro de prova preparados.")}><Video size={17} />Gravar no deck</button><input ref={uploadInput} hidden type="file" accept=".mp4,.mov,.m4v,video/mp4,video/quicktime" onChange={(event) => void handleUpload(event.target.files?.[0])} /><button className="primary-button" onClick={() => uploadInput.current?.click()}><Upload size={17} />Enviar vídeo</button></PageTitle>
+  return <><PageTitle kicker="ANÁLISE TÉCNICA" title="Vídeos de prova e treino" subtitle="Movimento, ciclos e evidências técnicas sincronizados ao vídeo real."><button className="secondary-button" onClick={onLive}><Radio size={17} />Análise ao vivo</button><button className="secondary-button" onClick={() => onNotify("Modo deck aberto: câmera, cronômetro e registro de prova preparados.")}><Video size={17} />Gravar no deck</button><input ref={uploadInput} hidden type="file" accept=".mp4,.mov,.m4v,video/mp4,video/quicktime" onChange={(event) => void handleUpload(event.target.files?.[0])} /><button className="primary-button" onClick={() => uploadInput.current?.click()}><Upload size={17} />Enviar vídeo</button></PageTitle>
      <div className="video-upload-context"><div><span className="eyebrow accent">CONTEXTO DO ENVIO</span><strong>Associe a gravação a um atleta antes de analisar.</strong></div><label><span>Atleta</span><select value={uploadAthleteId} onChange={(event) => setUploadAthleteId(event.target.value)}>{athletes.map((athlete) => <option value={athlete.id} key={athlete.id}>{athlete.name}</option>)}</select></label><label><span>Título opcional</span><input value={uploadTitle} onChange={(event) => setUploadTitle(event.target.value)} placeholder="Ex.: virada submersa · série 3" /></label></div>
      <div className="video-stats"><div><Film size={19} /><span><b>{catalog.length}</b> provas filmadas</span></div><div><Activity size={19} /><span><b>{catalog.filter((item) => item.status === "review" || item.status === "processing").length}</b> aguardando revisão</span></div><div><BarChart3 size={19} /><span><b>{catalog.filter((item) => item.date.toLowerCase().includes("ago") || item.date.toLowerCase() === "agora").length}</b> esta semana</span></div></div>
     <div className="roster-toolbar video-toolbar"><div className="filter-pills">{["Todos", "Para revisar", "Revisados"].map((item) => <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>{item}</button>)}</div><div className="local-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Atleta ou prova" /></div></div>

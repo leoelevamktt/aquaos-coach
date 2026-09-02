@@ -12,7 +12,7 @@ import { athletes, hydrateAthlete, meets, videos, type AthleteProfile } from "./
 import { Avatar } from "./components";
 import { AthleteDetail, Practices, Team, Today, type AppView } from "./views-primary";
 import { Analytics, Integrations, News, ProgramSettings, Season, Videos } from "./views-secondary";
-import { ConnectionDialog, InviteModal, MeetDetail, QuickCreate, VideoReview, WorkoutComposer } from "./modals";
+import { ConnectionDialog, InviteModal, LiveAnalysisModal, MeetDetail, QuickCreate, VideoReview, WorkoutComposer } from "./modals";
 import { ManagementCenter, type ManagementKind } from "./management";
 import type { WorkoutSeed } from "./workout-library-actions";
 import { AiAssistant } from "./ai-assistant";
@@ -20,7 +20,7 @@ import { RkfOperations } from "./rkf-operations";
 import { AuthGate, SKIP_DEMO_LOGIN_KEY } from "./auth-gate";
 import { apiRequest, subscribeToLiveEvents } from "./api";
 
-type Modal = "workout" | "invite" | "video" | "meet" | "command" | "manage" | "connection" | null;
+type Modal = "workout" | "invite" | "video" | "meet" | "command" | "manage" | "connection" | "live" | null;
 
 const routes: Record<AppView, string> = {
   today: "/pt/coach/today", athletes: "/pt/coach/athletes", practices: "/pt/coach/practices",
@@ -136,7 +136,7 @@ function CoachWorkspace() {
         {view === "athletes" && (selectedAthlete ? <AthleteDetail athlete={selectedAthlete} onBack={() => router.push(routes.athletes)} onCreate={() => openWorkout()} onNavigate={go} onNotify={notify} /> : <Team onInvite={() => setModal("invite")} onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} liveVersion={liveVersion} />)}
         {view === "practices" && <Practices onCreate={openWorkout} onNotify={notify} refreshToken={workoutRefresh + liveVersion} />}
         {view === "seasons" && <Season onMeet={(id) => { setMeetId(id); setModal("meet"); }} onSettings={() => go("settings")} onCreateMeet={() => openManage("meets", true)} onNotify={notify} liveVersion={liveVersion} />}
-        {view === "videos" && <Videos onVideo={(id) => { setVideoId(id); setModal("video"); }} onNotify={notify} liveVersion={liveVersion} />}
+        {view === "videos" && <Videos onVideo={(id) => { setVideoId(id); setModal("video"); }} onLive={() => setModal("live")} onNotify={notify} liveVersion={liveVersion} />}
         {view === "analytics" && <Analytics onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} liveVersion={liveVersion} />}
         {view === "rkf" && <RkfOperations onNotify={notify} />}
         {view === "inbox" && <News onNavigate={go} onAthlete={(id) => router.push(`${routes.athletes}/${id}`)} onNotify={notify} />}
@@ -151,6 +151,7 @@ function CoachWorkspace() {
     {modal === "workout" && <WorkoutComposer seed={workoutSeed} onClose={() => { setModal(null); setWorkoutSeed(undefined); }} onSave={() => { const edited = Boolean(workoutSeed?.persistedId); setModal(null); setWorkoutSeed(undefined); setWorkoutRefresh((value) => value + 1); router.push(routes.practices); notify(edited ? "Evento atualizado na agenda sem criar duplicata." : "Treino publicado e salvo no calendário."); }} />}
     {modal === "invite" && <InviteModal onClose={() => setModal(null)} onSave={() => { setModal(null); notify("Convite criado e copiado com segurança."); }} />}
     {modal === "video" && <VideoReview videoId={videoId} onClose={() => setModal(null)} onSave={() => { setModal(null); notify("Revisão técnica salva no prontuário."); }} />}
+    {modal === "live" && <LiveAnalysisModal onClose={() => setModal(null)} />}
     {modal === "meet" && <MeetDetail meetId={meetId} onClose={() => setModal(null)} onNotify={notify} />}
     {modal === "command" && <QuickCreate onClose={() => setModal(null)} onSelect={(choice) => { if (choice === "Treino") openWorkout(); else if (choice === "Convite") setModal("invite"); else if (choice === "Vídeo") { setModal(null); go("videos"); } else openManage(choice === "Atleta" ? "athletes" : choice === "Competição" ? "meets" : "goals", true); }} />}
     {modal === "manage" && <ManagementCenter onClose={() => setModal(null)} onNotify={notify} initialKind={manageKind} createOnOpen={createManaged} />}

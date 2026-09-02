@@ -31,3 +31,6 @@ apps/web/playwright-report/
 apps/api/storage/backups/
 apps/api/storage/uploads/*-ditado.wav
 apps/api/storage/uploads/*-voice-*
+
+# Assets de pose gerados (baixados/copiados no setup, não versionados)
+apps/web/public/pose/
