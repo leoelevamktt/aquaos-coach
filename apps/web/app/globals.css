@@ -2246,6 +2246,9 @@ body {
     --type-page: 30px;
   }
   .content { padding: 25px 17px 56px; }
+  .section-head { flex-wrap: wrap; }
+  .section-head > div { flex: 1 1 180px; min-width: 0; }
+  .section-head .text-button { flex: 0 1 auto; max-width: 100%; white-space: normal; }
   .page-title { align-items: stretch; gap: 16px; margin-bottom: 22px; }
   .page-title h1 { letter-spacing: -.035em; }
   .page-title p { max-width: 36rem; margin-top: 8px; }

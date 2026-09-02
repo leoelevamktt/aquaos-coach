@@ -17,7 +17,7 @@ import { ManagementCenter, type ManagementKind } from "./management";
 import type { WorkoutSeed } from "./workout-library-actions";
 import { AiAssistant } from "./ai-assistant";
 import { RkfOperations } from "./rkf-operations";
-import { AuthGate } from "./auth-gate";
+import { AuthGate, SKIP_DEMO_LOGIN_KEY } from "./auth-gate";
 import { apiRequest, subscribeToLiveEvents } from "./api";
 
 type Modal = "workout" | "invite" | "video" | "meet" | "command" | "manage" | "connection" | null;
@@ -83,6 +83,7 @@ function CoachWorkspace() {
   const selectSearch = (action: () => void) => { action(); setSearch(""); };
   const signOut = async () => {
     setSigningOut(true);
+    window.sessionStorage.setItem(SKIP_DEMO_LOGIN_KEY, "1");
     try { await apiRequest("/api/v1/auth/logout", { method: "POST" }); }
     catch { /* sessão já pode ter expirado */ }
     finally { window.location.assign("/pt/coach/today"); }

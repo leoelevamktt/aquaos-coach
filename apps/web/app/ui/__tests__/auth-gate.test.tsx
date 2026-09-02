@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import { AuthGate } from "../auth-gate";
+import { AuthGate, SKIP_DEMO_LOGIN_KEY } from "../auth-gate";
 import { apiRequest } from "../api";
 
 vi.mock("../api", () => ({
@@ -20,6 +20,7 @@ function meResponse(user: typeof coachUser | typeof athleteUser) {
 describe("AuthGate", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    window.sessionStorage.clear();
     // Production mode: no dev auto-login fallback.
     vi.stubEnv("NODE_ENV", "production");
   });
@@ -79,5 +80,21 @@ describe("AuthGate", () => {
     );
 
     await waitFor(() => expect(screen.getByText("Painel interno")).toBeInTheDocument());
+  });
+
+  it("não refaz o auto-login demo após um logout explícito em desenvolvimento", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    window.sessionStorage.setItem(SKIP_DEMO_LOGIN_KEY, "1");
+    mockedApi.mockRejectedValueOnce(new Error("sem sessão"));
+
+    render(
+      <AuthGate>
+        <div>Painel interno</div>
+      </AuthGate>,
+    );
+
+    expect(await screen.findByPlaceholderText("treinador@elevamkt.digital")).toBeInTheDocument();
+    expect(mockedApi).toHaveBeenCalledTimes(1);
+    expect(mockedApi).toHaveBeenCalledWith("/api/v1/auth/me");
   });
 });

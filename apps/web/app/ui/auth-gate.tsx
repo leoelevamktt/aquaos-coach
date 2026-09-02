@@ -6,6 +6,8 @@ import { apiRequest } from "./api";
 
 export type SessionUser = { id: string; name: string; email: string; role: string; athleteId?: string };
 
+export const SKIP_DEMO_LOGIN_KEY = "rkf_skip_demo_autologin";
+
 /**
  * Gate de autenticação do painel do coach.
  * Em dev mantém o auto-login demo; em produção exige credenciais reais.
@@ -23,7 +25,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     void apiRequest<{ user: SessionUser }>("/api/v1/auth/me")
       .then((response) => { setUser(response.user); setState(response.user.role === "coach" || response.user.role === "admin" ? "ready" : "denied"); })
       .catch(() => {
-        if (process.env.NODE_ENV !== "production") {
+        const skipDemoLogin = window.sessionStorage.getItem(SKIP_DEMO_LOGIN_KEY) === "1";
+        if (process.env.NODE_ENV !== "production" && !skipDemoLogin) {
           void apiRequest<{ user: SessionUser }>("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "coach@natacao.local", password: "natacao-demo" }) })
             .then((response) => { setUser(response.user); setState(response.user.role === "coach" || response.user.role === "admin" ? "ready" : "denied"); })
             .catch(() => setState("signin"));
@@ -34,6 +37,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     setSubmitting(true);
     try { await apiRequest("/api/v1/auth/logout", { method: "POST" }); } catch { /* sessão já inválida */ }
+    window.sessionStorage.setItem(SKIP_DEMO_LOGIN_KEY, "1");
     setUser(null); setEmail(""); setPassword(""); setError("");
     setSubmitting(false);
     setState("signin");
@@ -45,6 +49,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     setSubmitting(true); setError("");
     try {
       const response = await apiRequest<{ user: SessionUser }>("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: email.trim(), password }) });
+      window.sessionStorage.removeItem(SKIP_DEMO_LOGIN_KEY);
       setUser(response.user);
       if (response.user.role === "coach" || response.user.role === "admin") setState("ready");
       else setState("denied");

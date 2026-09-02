@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================================
 # user-data.sh — bootstrap da EC2 (Ubuntu 24.04 LTS, t3.small) — conta eleva
-# Sem domínio: HTTP puro no IP público (Caddy no modo :80).
+# HTTPS automático por domínio, sem credenciais versionadas.
 # ============================================================================
 set -euo pipefail
 
@@ -21,7 +21,7 @@ fi
 
 # 2. Docker + Compose plugin + utilitários
 apt-get update -y
-apt-get install -y ca-certificates curl git ufw
+apt-get install -y ca-certificates curl git ufw openssl
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 chmod a+r /etc/apt/keyrings/docker.asc
@@ -29,7 +29,7 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
 apt-get update -y
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-# 3. Firewall: SSH + HTTP (HTTPS sem domínio não se aplica; liberado p/ futuro)
+# 3. Firewall: SSH + HTTP/HTTPS
 ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
@@ -46,19 +46,24 @@ else
   git clone --depth 1 "$GITHUB_REPO" .
 fi
 
-# 5. Env de produção — preenchido com os valores reais do deploy
-PUBLIC_IP=$(curl -fsS http://169.254.169.254/latest/meta-data/public-ipv4 || true)
-cat > .env <<EOF
-POSTGRES_PASSWORD=5b67485e349798ef7ff1fed352ee09b8
-CORS_ORIGINS=http://\${PUBLIC_IP}
-PUBLIC_API_URL=http://\${PUBLIC_IP}
+# 5. Env de produção — criado uma única vez, com permissão restrita.
+# Segredos opcionais (LLM e contas iniciais) devem ser injetados por um cofre
+# de segredos ou incluídos manualmente no .env protegido antes de iniciar.
+if [ ! -f .env ]; then
+  umask 077
+  DB_PASSWORD="$(openssl rand -hex 32)"
+  cat > .env <<EOF
+POSTGRES_PASSWORD=${DB_PASSWORD}
+APP_DOMAIN=natacao.elevamkt.digital
+APP_BASE_URL=https://natacao.elevamkt.digital
+CORS_ORIGINS=https://natacao.elevamkt.digital
+PUBLIC_API_URL=https://natacao.elevamkt.digital
 EOF
+fi
+chmod 600 .env
 
-# 6. Caddyfile em modo HTTP puro (sem domínio)
-sed -i 's/^SEU_DOMINIO {/:80 {/; s|^# :80 {|# SEU_DOMINIO {|' infra/Caddyfile
-
-# 7. Build + start — em background: o build completo passa do timeout do
-#    user-data; o log continua em /var/log/user-data.log
+# 6. Build + start — em background: o build completo passa do timeout do
+# user-data; o log continua em /var/log/user-data.log
 nohup docker compose -f docker-compose.aws.yml up -d --build >> /var/log/user-data.log 2>&1 &
 
 echo "Bootstrap assíncrono iniciado em $(date -u +%Y-%m-%dT%H:%M:%SZ)"

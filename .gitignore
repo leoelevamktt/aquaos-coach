@@ -10,6 +10,8 @@ dist/
 .env
 .env.local
 .env.*.local
+CREDENTIALS.md
+credentials*.md
 
 # Dados locais da API (estado mutável) — uploads de vídeo de exemplo são versionados
 apps/api/storage/aquaos-data.json

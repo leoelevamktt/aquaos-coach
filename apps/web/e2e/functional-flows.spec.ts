@@ -83,11 +83,11 @@ test.describe("fluxos do coach", () => {
     await page.getByRole("button", { name: /^Criar$/ }).click();
     await expect(page.getByRole("dialog", { name: "Criar" })).toBeVisible();
     await page.getByRole("dialog", { name: "Criar" }).getByRole("button", { name: /^Treino/ }).click();
-    await expect(page.getByRole("dialog", { name: "Criar treino de natação" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Criar treino na agenda" })).toBeVisible();
     await assertLayout(page);
     await page.getByRole("button", { name: "Estruturar treino" }).click();
     await page.getByRole("button", { name: "Continuar" }).click();
-    await page.getByRole("button", { name: /Publicar e sincronizar/ }).click();
+    await page.getByRole("button", { name: /Publicar em/ }).click();
     await expect(page).toHaveURL(/\/pt\/coach\/practices/);
     await expect(page.locator("body")).toContainText(/Treinos|publicado/i);
     // O AuthGate consulta /auth/me antes do login; esse 401 esperado não é falha do fluxo.

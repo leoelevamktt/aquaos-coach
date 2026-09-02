@@ -37,11 +37,11 @@ async function assertBoundary(page: Page, width: number) {
         && (rect.left < -1 || rect.right > viewportWidth + 1)
         && !element.closest(intentionalScroll);
     }).filter((element) => !["BODY", "HTML", "SVG", "PATH"].includes(element.tagName)).slice(0, 10).map((element) => ({ tag: element.tagName, className: String(element.className), text: (element.textContent ?? "").trim().slice(0, 70), rect: [Math.round(element.getBoundingClientRect().left), Math.round(element.getBoundingClientRect().right)] }));
-    return { documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth, escaped };
+    return { path: location.pathname, documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth, escaped };
   }, width);
   expect(result.documentWidth, `documento excedeu ${width}px`).toBeLessThanOrEqual(width + 1);
-  expect(result.bodyWidth, `body excedeu ${width}px`).toBeLessThanOrEqual(width + 1);
-  expect(result.escaped, `elementos escaparam da viewport ${width}px`).toEqual([]);
+  expect(result.escaped, `elementos escaparam da viewport ${width}px em ${result.path}`).toEqual([]);
+  expect(result.bodyWidth, `body excedeu ${width}px em ${result.path}`).toBeLessThanOrEqual(width + 1);
 }
 
 test("limites 320/768 não quebram telas coach", async ({ page }) => {

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 const nextConfig = {
   transpilePackages: ["@natacao/domain"],
   outputFileTracingRoot: fileURLToPath(new URL("../..", import.meta.url)),
+  devIndicators: false,
 };
 
 export default nextConfig;
