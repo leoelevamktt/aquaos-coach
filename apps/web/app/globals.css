@@ -2414,3 +2414,55 @@ body :is(.athlete-row b, .create-options strong, .session-strip strong,
   .rkf-method-map > div > span { flex-basis: 100%; }
   .rkf-method-map > div > span svg { transform: rotate(90deg); }
 }
+
+/* ── Análise de movimento em tempo real (pose + métricas por atleta) ── */
+.live-analysis { display: grid; gap: 13px; padding: 18px 20px 20px; }
+.live-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.live-source-group { display: flex; align-items: center; gap: 6px; margin-right: auto; }
+.live-source-button { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 8px 12px; color: #50656c; font-size: var(--type-caption); font-weight: 600; cursor: pointer; }
+.live-source-button.active { border-color: var(--teal); color: var(--teal); background: var(--teal-soft); }
+.live-control { display: flex; align-items: center; gap: 6px; color: #50656c; }
+.live-control select { height: 36px; border: 1px solid #d7e0e1; border-radius: 8px; background: #fff; padding: 0 8px; color: var(--ink); }
+.live-hint { margin: -6px 0 0; color: var(--muted); font-size: var(--type-caption); }
+.live-stage { position: relative; min-height: 330px; overflow: hidden; border-radius: 10px; background: #07191f; }
+.live-stage video { width: 100%; height: 100%; min-height: 330px; object-fit: contain; background: #07191f; }
+.live-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.live-stage-placeholder { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 5px; text-align: center; color: rgba(255,255,255,.82); }
+.live-stage-placeholder svg { color: #2ec5b0; }
+.live-stage-placeholder b { font-size: var(--type-body); }
+.live-stage-placeholder small { max-width: 380px; color: rgba(255,255,255,.6); font-size: var(--type-caption); }
+.live-stage-status { position: absolute; left: 12px; top: 12px; right: 12px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.live-pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 6px; background: rgba(7,28,35,.82); color: #fff; font-size: var(--type-micro); font-weight: 700; letter-spacing: .5px; }
+.live-pill.running { color: #6ff2d8; }
+.live-pill.running i { width: 7px; height: 7px; border-radius: 50%; background: #2ec5b0; box-shadow: 0 0 0 3px rgba(46,197,176,.25); animation: live-pulse 1.4s infinite; }
+.live-pill.error { color: #ffb3ad; }
+.live-pill.loading, .live-pill.idle { color: rgba(255,255,255,.75); }
+.live-spinner { width: 11px; height: 11px; border: 2px solid rgba(255,255,255,.35); border-top-color: #2ec5b0; border-radius: 50%; animation: live-spin .8s linear infinite; }
+.live-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 6px; background: rgba(7,28,35,.82); color: rgba(255,255,255,.88); font-size: var(--type-micro); }
+@keyframes live-pulse { 50% { box-shadow: 0 0 0 6px rgba(46,197,176,.12); } }
+@keyframes live-spin { to { transform: rotate(360deg); } }
+.live-athletes { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 11px; }
+.live-athlete-card { border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 13px; box-shadow: var(--shadow); }
+.live-athlete-card header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.live-athlete-card header small { margin-left: auto; color: var(--muted); font-size: var(--type-micro); }
+.live-athlete-dot { width: 10px; height: 10px; border-radius: 50%; }
+.live-metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.live-metric-grid > div { display: grid; gap: 2px; padding: 8px; border-radius: 7px; background: #f2f7f6; }
+.live-metric-grid span { color: #60747b; font-size: 9px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; }
+.live-metric-grid strong { font-size: var(--type-control); }
+.live-confidence-bar { height: 5px; margin-top: 10px; border-radius: 3px; background: #e3edeb; overflow: hidden; }
+.live-confidence-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2ec5b0, #22d3ee); transition: width .3s ease; }
+.live-empty { margin: 0; color: var(--muted); font-size: var(--type-caption); }
+.pose-toggle { position: absolute; z-index: 5; left: 12px; top: 12px; display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border: 1px solid rgba(255,255,255,.35); border-radius: 7px; background: rgba(8,30,37,.78); color: #fff; font-size: var(--type-micro); font-weight: 700; cursor: pointer; }
+.pose-toggle.active { border-color: #2ec5b0; background: rgba(46,197,176,.24); color: #6ff2d8; }
+.pose-tracking-canvas { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.pose-tracking-chip { position: absolute; z-index: 3; right: 12px; bottom: 14px; display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border-radius: 7px; background: rgba(7,28,35,.85); color: #6ff2d8; font-size: var(--type-micro); font-weight: 700; }
+.pose-tracking-chip-loading { color: rgba(255,255,255,.85); }
+.pose-tracking-chip-error { max-width: 60%; color: #ffb3ad; }
+.live-analysis-modal .modal-wide { width: min(1040px, 96vw); }
+
+@media (max-width: 760px) {
+  .live-stage, .live-stage video { min-height: 220px; }
+  .live-source-group { width: 100%; justify-content: flex-start; }
+  .live-metric-grid { grid-template-columns: repeat(2, 1fr); }
+}
