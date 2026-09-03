@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
@@ -70,7 +69,7 @@ def create_app(settings: Settings | None = None, pose: object | None = None) -> 
     """`pose` injetável para testes; em produção o modelo real é carregado no startup."""
     settings = settings or settings_from_env()
     pose_engine = None if pose is not None else PoseEngine(settings)
-    analysis_lock = threading.Lock()
+    analysis_lock = asyncio.Lock()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -119,20 +118,22 @@ def create_app(settings: Settings | None = None, pose: object | None = None) -> 
         )
         loop = asyncio.get_running_loop()
         try:
-            # Inference libera o GIL; o lock serializa análises simultâneas.
-            if not analysis_lock.acquire(timeout=ANALYZE_LOCK_TIMEOUT_SECONDS):
-                raise HTTPException(status_code=503, detail="Serviço ocupado com outra análise.")
-            try:
-                return await loop.run_in_executor(
-                    None,
-                    functools.partial(analyze_video, str(video_path), model, calibration_points, options),
-                )
-            finally:
-                analysis_lock.release()
+            async with asyncio.timeout(ANALYZE_LOCK_TIMEOUT_SECONDS):
+                await analysis_lock.acquire()
+        except TimeoutError:
+            raise HTTPException(status_code=503, detail="Serviço ocupado com outra análise.")
+        try:
+            # Inference libera o GIL; o lock asyncio serializa análises sem bloquear o loop.
+            return await loop.run_in_executor(
+                None,
+                functools.partial(analyze_video, str(video_path), model, calibration_points, options),
+            )
         except NoPeopleDetected as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
+        finally:
+            analysis_lock.release()
 
     return app
 

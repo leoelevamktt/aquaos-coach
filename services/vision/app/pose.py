@@ -6,6 +6,7 @@ para VISION_MODEL_DIR e reaproveitados pelo volume de cache em produção.
 
 from __future__ import annotations
 
+import shutil
 import threading
 import urllib.request
 import zipfile
@@ -17,11 +18,22 @@ from rtmlib import RTMO
 from .config import Settings
 from .errors import VisionUnavailable
 
+DOWNLOAD_TIMEOUT_SECONDS = 300.0
+
 
 class PoseModel(Protocol):
     """Contrato de inferência: imagem BGR -> (keypoints (N, 17, 2), scores (N, 17))."""
 
     def __call__(self, image, score_thr: float | None = None, nms_thr: float | None = None): ...
+
+
+def _download(url: str, destination: Path) -> None:
+    """Baixa com timeout e renomeação atômica: nunca deixa um zip parcial no cache."""
+    request = urllib.request.Request(url, headers={"User-Agent": "aquaos-vision/1.0"})
+    partial = destination.with_suffix(".part")
+    with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response, open(partial, "wb") as target:
+        shutil.copyfileobj(response, target)
+    partial.replace(destination)
 
 
 def ensure_model_file(settings: Settings) -> Path:
@@ -34,11 +46,18 @@ def ensure_model_file(settings: Settings) -> Path:
         return onnx
     try:
         if not archive.exists():
-            urllib.request.urlretrieve(url, archive)
+            _download(url, archive)
         with zipfile.ZipFile(archive) as bundle:
             member = next(name for name in bundle.namelist() if name.endswith(".onnx"))
             with bundle.open(member) as source, open(onnx, "wb") as target:
-                target.write(source.read())
+                shutil.copyfileobj(source, target)
+    except zipfile.BadZipFile:
+        # Cache corrompido (ex.: download interrompido em versões antigas):
+        # remove para o próximo início baixar de novo em vez de ficar degradado.
+        archive.unlink(missing_ok=True)
+        raise VisionUnavailable("Cache do modelo RTMO corrompido; removido para novo download.")
+    except VisionUnavailable:
+        raise
     except Exception as error:  # noqa: BLE001 - qualquer falha vira 503 e a API cai no AquaMotion
         raise VisionUnavailable(f"Não foi possível obter o modelo RTMO: {error}") from error
     return onnx
