@@ -1,0 +1,68 @@
+# AquaVision - serviço de visão
+
+Microservice Python (FastAPI) que analisa vídeos de natação com pose one-stage
+**RTMO** (OpenMMLab, Apache-2.0, via `rtmlib`/ONNX Runtime), rastreio
+multi-atleta estilo **BYTE** com filtro de Kalman, suavização zero-fase
+Savitzky-Golay e calibração opcional por homografia para métricas em metros.
+A API Node chama `POST /analyze` e cai no AquaMotion (FFmpeg) se este serviço
+estiver indisponível.
+
+## Rodar
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m uvicorn app.main:app --port 8800   # baixa o modelo no 1º início
+```
+
+Sem Docker, `VISION_MEDIA_ROOT` aponta para `apps/api/storage/uploads` do
+repositório por padrão. No Docker, o `docker-compose.yml` sobe o serviço como
+`vision` montando o mesmo volume de uploads da API (caminhos absolutos
+idênticos) e o cache de modelos em `natacao_vision_models`.
+
+## Endpoints
+
+- `GET /health` - `ok`, `loading` (modelo baixando) ou degradado.
+- `POST /analyze` - corpo `{ "path": "...", "calibration"?: {...}, "targetFps"?, "minTrackSeconds"? }`.
+  Respostas: 200 com a análise (contrato `metrics`/`timeline`/`events` +
+  `people` por atleta); 404 vídeo ausente; 422 sem atletas rastreáveis ou
+  calibração degenerada; 503 modelo indisponível ou serviço ocupado.
+
+Calibração: 4+ pares `image` (pixels) para `world` (metros) não colineares,
+por exemplo cantos de raia. Habilita velocidade (m/s), distância (m) e metros
+por braçada; o RMSE da homografia é reportado em `metadata.calibrationRmse`.
+
+## CLI de diagnóstico
+
+```bash
+.venv/bin/python -m app.cli ../../apps/api/storage/uploads/treino.mp4 --json saida.json
+```
+
+## Testes
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest
+```
+
+Os testes rodam sem o modelo real (pose injetável + vídeos sintéticos).
+
+## Variáveis de ambiente
+
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `VISION_MODEL_DIR` | `./models` | Cache dos pesos ONNX (~85 MB no 1º início) |
+| `VISION_MEDIA_ROOT` | `apps/api/storage/uploads` | Raiz para caminhos relativos |
+| `VISION_DEVICE` | `cpu` | Dispositivo do ONNX Runtime (`cpu`, `cuda:0`) |
+| `VISION_MODE` | `balanced` | `lightweight` (rtmo-s), `balanced` (rtmo-m), `performance` (rtmo-l) |
+| `VISION_HOST`/`VISION_PORT` | `0.0.0.0`/`8800` | Bind do uvicorn |
+
+## Notas de precisão
+
+- Modelos de pose treinados em terra degradam na água (respingos, corpo
+  ventral, refração). O pipeline assume câmera aérea/borda acima da água;
+  cobertura e confiança média por atleta são reportadas para julgar o resultado.
+- Detecções fracas (submersão parcial) alimentam apenas a manutenção de tracks
+  (segundo estágio BYTE), nunca criam novos atletas.
+- Fragmentos do mesmo atleta separados por até 5 s de submersão são costurados
+  quando a reentrada é compatível com a velocidade extrapolada e nenhum outro
+  atleta esteve ativo na lacuna.

@@ -1,6 +1,7 @@
 import { extname, resolve } from "node:path";
 import type { ManagedRecord, ManagedStore } from "./managed-store.js";
-import { analyzeVideo } from "./video-analysis.js";
+import { analyzeVideo, generateThumbnail } from "./video-analysis.js";
+import { analyzeWithVision, type VisionAnalysis } from "./vision-client.js";
 
 type VideoJob = ManagedRecord & {
   videoId: string;
@@ -97,12 +98,23 @@ export class VideoAnalysisQueue {
     };
 
     try {
-      updateProgress(1, "Iniciando análise temporal");
+      const videoPath = resolve(this.uploadRoot, video.filename);
       const thumbnail = `${video.filename.replace(extname(video.filename), "")}-thumb.jpg`;
-      const analysis = await analyzeVideo(resolve(this.uploadRoot, video.filename), resolve(this.uploadRoot, thumbnail), updateProgress);
+      const thumbnailPath = resolve(this.uploadRoot, thumbnail);
+      updateProgress(2, "Consultando motor de visão AquaVision");
+      const vision = await analyzeWithVision(videoPath, updateProgress);
+      let analysis: Awaited<ReturnType<typeof analyzeVideo>> | VisionAnalysis;
+      if (vision) {
+        updateProgress(90, "Gerando quadro de referência");
+        await generateThumbnail(videoPath, thumbnailPath, vision.metadata.durationSeconds);
+        analysis = vision;
+      } else {
+        updateProgress(4, "Motor de visão indisponível — usando AquaMotion local");
+        analysis = await analyzeVideo(videoPath, thumbnailPath, updateProgress);
+      }
       const updated = this.store.update("videos", video.id, {
-        analysisStatus: "ready",
         status: "ready",
+        analysisStatus: "ready",
         analysisProgress: 100,
         analysisStage: "Análise concluída",
         analysisJobId: job.id,
@@ -110,7 +122,7 @@ export class VideoAnalysisQueue {
         thumbnailUrl: `/uploads/${thumbnail}`,
         ...analysis.metadata,
       }, "analyze");
-      this.store.update("videoAnalysisJobs", job.id, { status: "completed", progress: 100, stage: "Análise concluída", completedAt: now(), result: { videoId: video.id, analyzedAt: analysis.analyzedAt } });
+      this.store.update("videoAnalysisJobs", job.id, { status: "completed", progress: 100, stage: "Análise concluída", completedAt: now(), result: { videoId: video.id, analyzedAt: analysis.analyzedAt, engine: analysis.engine } });
       return updated;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha desconhecida na análise";
