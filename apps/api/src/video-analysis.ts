@@ -18,6 +18,18 @@ function ratio(value = "0/1") {
   return b ? a / b : a;
 }
 
+async function probeDuration(filePath: string) {
+  const { stdout } = await execute(ffprobe.path, ["-v", "error", "-show_entries", "format=duration", "-of", "json", filePath], { maxBuffer: 10 * 1024 * 1024 });
+  return Number((JSON.parse(stdout) as ProbeOutput).format?.duration ?? 0);
+}
+
+/** Quadro de referência em ~45% do vídeo, escalado para até 960 px de largura. */
+export async function generateThumbnail(filePath: string, thumbnailPath: string, durationSeconds?: number) {
+  if (!executable) throw new Error("FFmpeg não está disponível neste ambiente.");
+  const duration = durationSeconds ?? await probeDuration(filePath);
+  await execute(executable, ["-y", "-ss", String(Math.max(.5, duration * .45)), "-i", filePath, "-frames:v", "1", "-vf", "scale='min(960,iw)':-2", thumbnailPath], { maxBuffer: 10 * 1024 * 1024 });
+}
+
 export async function analyzeVideo(filePath: string, thumbnailPath?: string, onProgress?: AnalysisProgress) {
   if (!executable) throw new Error("FFmpeg não está disponível neste ambiente.");
   await onProgress?.(5, "Lendo metadados do vídeo");
@@ -72,7 +84,7 @@ export async function analyzeVideo(filePath: string, thumbnailPath?: string, onP
   await onProgress?.(78, "Calculando ciclos e consistência técnica");
   if (thumbnailPath) {
     await onProgress?.(88, "Gerando quadro de referência");
-    await execute(executable, ["-y", "-ss", String(Math.max(.5, duration * .45)), "-i", filePath, "-frames:v", "1", "-vf", "scale='min(960,iw)':-2", thumbnailPath], { maxBuffer: 10 * 1024 * 1024 });
+    await generateThumbnail(filePath, thumbnailPath, duration);
   }
   await onProgress?.(100, "Análise concluída");
 

@@ -31,6 +31,7 @@ O frontend usa o backend em `http://localhost:4000`. Para apontar para outro amb
 - Importação CSV/JSON para cadastros e decodificação FIT pelo SDK oficial da Garmin.
 - Dois vídeos técnicos carregados, streaming com suporte a `Range`, miniaturas e análise AquaMotion sincronizada à reprodução.
 - Métricas de vídeo: curva de movimento, ciclos detectados, cadência estimada, consistência rítmica, índice técnico, eventos automáticos e marcações manuais.
+- Motor de visão AquaVision (opcional): serviço Python com pose one-stage RTMO (Apache-2.0, ONNX Runtime), rastreio multi-atleta estilo BYTE com filtro de Kalman, costura de fragmentos após submersão, suavização zero-fase Savitzky-Golay e calibração por homografia para velocidade e distância em metros. Sem o serviço em `VISION_URL`, a fila cai automaticamente no AquaMotion local.
 - Editor conversacional de treino com foto/documento, estruturação, publicação persistente e atribuição.
 - Temporadas, mesociclos, competições, índices, inscrições, modo deck e documentos de competição.
 - Calendário, biblioteca de natação/força, prontuário longitudinal e analytics do programa.
@@ -52,7 +53,20 @@ O frontend usa o backend em `http://localhost:4000`. Para apontar para outro amb
 
 Os arquivos ficam em `apps/api/storage/uploads` no desenvolvimento local e no volume persistente da API no Docker. Metadados, CRUD e auditoria ficam em `apps/api/storage/aquaos-data.json` como camada operacional local; o schema PostgreSQL permanece preparado para a homologação multiusuário.
 
-A análise AquaMotion usa diferença temporal de quadros com FFmpeg. Ela gera indicadores objetivos durante a reprodução, mas não substitui a validação técnica do treinador e não deve ser apresentada como visão computacional clínica ou arbitragem automática.
+A análise de vídeo tem dois motores. O **AquaVision** (`services/vision`, Python/FastAPI) mapeia o esqueleto dos atletas com RTMO, rastreia cada um por BYTE+Kalman, costura fragmentos de submersão, detecta braçadas pela periodicidade dos keypoints e converte pixels em metros quando recebe calibração. O **AquaMotion** (FFmpeg, diferença temporal) é o fallback local: a fila tenta o AquaVision em `VISION_URL` e usa o AquaMotion se o serviço estiver indisponível ou não encontrar atletas. No `docker compose up --build` os dois sobem juntos (o modelo RTMO, ~85 MB, é baixado no primeiro início para o volume `natacao_vision_models`); sem Docker, rode `uvicorn app.main:app` dentro de `services/vision` (veja `services/vision/README.md`). A resposta de ambos os motores mantém o contrato `metrics`/`timeline`/`events` consumido pela UI; o AquaVision acrescenta `people`, com métricas por atleta.
+
+Calibração opcional (homografia imagem para mundo em metros), enviada junto com a análise:
+
+```json
+{ "path": "/app/apps/api/storage/uploads/treino.mp4",
+  "calibration": { "points": [
+    { "image": [x, y], "world": [X, Y] }, { "image": [x, y], "world": [X, Y] },
+    { "image": [x, y], "world": [X, Y] }, { "image": [x, y], "world": [X, Y] } ] } }
+```
+
+Quatro ou mais pares não colineares (por exemplo, cantos de raia com coordenadas reais da piscina) habilitam velocidade em m/s, distância em metros e metros por braçada; sem calibração, as métricas vêm em pixels.
+
+A análise AquaMotion usa diferença temporal de quadros com FFmpeg. Ambos os motores geram indicadores objetivos durante a reprodução, mas não substituem a validação técnica do treinador e não devem ser apresentados como visão computacional clínica ou arbitragem automática. Câmera aérea fixa acima da água é a configuração mais confiável para o AquaVision; filmagens de borda com o atleta parcialmente submerso degradam a pose e reduzem a cobertura do rastreio — o resultado informa a cobertura e a confiança média para o treinador julgar.
 
 ## Importante
 

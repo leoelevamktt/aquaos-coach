@@ -23,6 +23,7 @@ services:
       API_PORT: 4000
       DATABASE_URL: postgres://natacao:natacao@postgres:5432/natacao
       PERSISTENCE_REQUIRED: "true"
+      VISION_URL: http://vision:8800
     ports:
       - "4000:4000"
     volumes:
@@ -30,6 +31,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+  vision:
+    build:
+      context: .
+      dockerfile: services/vision/Dockerfile
+    environment:
+      VISION_MEDIA_ROOT: /app/apps/api/storage/uploads
+    volumes:
+      # Mesmo caminho do container da API: os caminhos absolutos coincidem.
+      - natacao_api_storage:/app/apps/api/storage
+      - natacao_vision_models:/models
+    depends_on:
+      - api
   web:
     build:
       context: .
@@ -43,3 +56,4 @@ services:
 volumes:
   natacao_pgdata:
   natacao_api_storage:
+  natacao_vision_models:
