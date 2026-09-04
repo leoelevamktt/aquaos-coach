@@ -11,6 +11,7 @@ import { Avatar, ModalShell } from "./components";
 import { apiRequest, mediaUrl, subscribeToLiveEvents, uploadFile } from "./api";
 import type { WorkoutSeed } from "./workout-library-actions";
 import { LiveAnalysis, PoseTrackingLayer } from "./pose/LiveAnalysis";
+import { TRACK_COLORS, type TrackedKeyframe } from "./pose/server-track";
 
 type SyncProvider = "garmin" | "polar" | "apple";
 
@@ -140,14 +141,33 @@ export function InviteModal({ onClose, onSave }: { onClose: () => void; onSave: 
   return <ModalShell title="Convidar atleta" subtitle="Crie acesso individual e defina o grupo inicial" onClose={onClose}>{invitationUrl ? <><div className="invite-success"><CircleCheck size={30} /><h3>Convite criado</h3><p>Envie este link ao atleta. Ele expira em 7 dias e só pode ser utilizado uma vez.</p><div className="copy-field"><input readOnly value={invitationUrl} aria-label="Link do convite" /><button onClick={() => void copyInvitation()}>{copied ? "Copiado" : "Copiar"}</button></div></div><footer className="modal-footer"><button className="primary-button" onClick={() => { onSave(invitationUrl); onClose(); }}>Concluir</button></footer></> : <><div className="modal-form"><label><span>Nome completo</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Nome do atleta" /></label><label><span>E-mail</span><input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="atleta@email.com" /></label><label><span>Grupo</span><select value={group} onChange={(event) => setGroup(event.target.value)}><option>Elite · Raia 4</option><option>Desenvolvimento · Raia 3</option><option>Base · Raia 2</option><option>Águas abertas</option></select></label><div className="secure-note"><ShieldCheck size={18} /><p>O convite expira em 7 dias e pode ser revogado. O consentimento de dados de saúde é solicitado separadamente.</p></div>{error && <p className="modal-error" role="alert">{error}</p>}</div><footer className="modal-footer"><button className="secondary-button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={saving || !name || !email} onClick={() => void save()}><Send size={16} />{saving ? "Criando…" : "Criar convite"}</button></footer></>}</ModalShell>;
 }
 
+type VisionPerson = {
+  id: number;
+  firstSeen: number;
+  lastSeen: number;
+  durationSeconds: number;
+  strokes: number;
+  strokeRate: number;
+  rhythmConsistency: number;
+  avgSpeed: number;
+  maxSpeed: number;
+  distance: number;
+  distancePerStroke: number;
+  technicalIndex: number;
+  meanConfidence: number;
+  coverage: number;
+  strokeSignal?: string | null;
+};
 type MotionAnalysis = {
   engine: string;
   engineVersion: string;
   methodology: string;
-  metadata: { durationSeconds: number; width: number; height: number; fps: number; sizeBytes: number; bitrate: number };
+  metadata: { durationSeconds: number; width: number; height: number; fps: number; sizeBytes: number; bitrate: number; units?: string; calibrated?: boolean; persons?: number };
   metrics: { detectedCycles: number; estimatedCadence: number; rhythmConsistency: number; meanMotion: number; peakMotion: number; technicalIndex: number };
   timeline: { time: number; motion: number }[];
   events: { id: string; time: number; category: string; label: string; confidence: number; note?: string }[];
+  people?: VisionPerson[];
+  keyframes?: TrackedKeyframe[];
 };
 type ManagedVideo = { id: string; title?: string; athlete?: string; event?: string; url?: string; thumbnailUrl?: string; durationSeconds?: number; analysisStatus?: string; analysisProgress?: number; analysisStage?: string; analysisError?: string; analysisJobId?: string; analysis?: MotionAnalysis; manualEvents?: MotionAnalysis["events"] };
 const clock = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${Math.floor(seconds % 60).toString().padStart(2, "0")}.${Math.floor((seconds % 1) * 10)}`;
@@ -163,6 +183,9 @@ export function VideoReview({ videoId, onClose, onSave }: { videoId: string; onC
   const [saveError, setSaveError] = useState("");
   const [processing, setProcessing] = useState(true);
   const [poseEnabled, setPoseEnabled] = useState(false);
+  const [aiSummary, setAiSummary] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
   const markers = ["Entrada", "Velocidade", "Virada", "Ritmo", "Chegada"];
   const applyRemote = (remote: ManagedVideo) => {
     setRecord(remote);
@@ -212,18 +235,52 @@ export function VideoReview({ videoId, onClose, onSave }: { videoId: string; onC
       setSaveError(cause instanceof Error ? cause.message : "Não foi possível salvar a revisão.");
     }
   };
+  const requestAiSummary = async () => {
+    if (!analysis) return;
+    setAiBusy(true);
+    setAiError("");
+    setAiSummary("");
+    try {
+      const response = await apiRequest<{ reply: string }>("/api/v1/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: buildVisionSummaryPrompt(analysis) }] }) });
+      setAiSummary(response.reply);
+    } catch (cause) {
+      setAiError(cause instanceof Error ? cause.message : "Não foi possível gerar o resumo da IA.");
+    } finally {
+      setAiBusy(false);
+    }
+  };
   return <ModalShell title={`${record.athlete ?? fallback.athlete} · ${record.event ?? record.title ?? fallback.event}`} subtitle={`Análise sincronizada · ${analysis?.engine ?? "AquaMotion"} ${analysis?.engineVersion ?? ""}`} onClose={onClose} wide>
      <div className="live-analysis-banner"><span className={processing ? "processing" : record.analysisStatus === "failed" ? "failed" : "live"}><i />{processing ? `PROCESSANDO VÍDEO · ${record.analysisProgress ?? 0}%` : record.analysisStatus === "failed" ? "ANÁLISE INTERROMPIDA" : "ANÁLISE ATIVA"}</span><p>{record.analysisStage ?? analysis?.methodology ?? "Carregando metadados e curva de movimento…"}</p><em>{analysis ? `${analysis.metadata.width}×${analysis.metadata.height} · ${analysis.metadata.fps} fps` : record.analysisError ?? ""}</em></div>
-    <div className="review-layout real-review"><div><div className="review-player"><div className="real-video-stage"><video ref={player} src={mediaUrl(record.url)} poster={mediaUrl(record.thumbnailUrl)} playsInline preload="metadata" onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} /><button type="button" className={`pose-toggle ${poseEnabled ? "active" : ""}`} onClick={() => setPoseEnabled((value) => !value)} aria-pressed={poseEnabled} title="Rastreamento de pose em tempo real"><Sparkles size={15} />IA</button>{poseEnabled && <PoseTrackingLayer videoRef={player} active />}<button className="video-play-control" onClick={() => void toggle()}>{playing ? <Pause size={23} fill="currentColor" /> : <Play size={23} fill="currentColor" />}</button><span className="player-time">{clock(currentTime)} / {clock(duration)}</span><span className="active-phase">{activeEvent?.label ?? "Aguardando fase técnica"}</span></div><div className="timeline live-timeline" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); seek(((event.clientX - rect.left) / rect.width) * duration); }}><i style={{ width: `${duration ? currentTime / duration * 100 : 0}%` }} />{allEvents.map((event, index) => <em key={event.id} title={`${event.label} · ${clock(event.time)}`} style={{ left: `${duration ? event.time / duration * 100 : 0}%`, background: zoneDistribution[index % zoneDistribution.length].color }} />)}</div></div>
+    <div className="review-layout real-review"><div><div className="review-player"><div className="real-video-stage"><video ref={player} src={mediaUrl(record.url)} poster={mediaUrl(record.thumbnailUrl)} playsInline preload="metadata" onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} /><button type="button" className={`pose-toggle ${poseEnabled ? "active" : ""}`} onClick={() => setPoseEnabled((value) => !value)} aria-pressed={poseEnabled} title={analysis?.keyframes?.length ? "Rastreamento AquaVision do servidor, sincronizado com a reprodução" : "Rastreamento de pose em tempo real no navegador"}><Sparkles size={15} />IA{analysis?.keyframes?.length ? " · servidor" : ""}</button>{poseEnabled && <PoseTrackingLayer videoRef={player} active serverKeyframes={analysis?.keyframes} serverPeopleCount={analysis?.people?.length ?? 0} />}<button className="video-play-control" onClick={() => void toggle()}>{playing ? <Pause size={23} fill="currentColor" /> : <Play size={23} fill="currentColor" />}</button><span className="player-time">{clock(currentTime)} / {clock(duration)}</span><span className="active-phase">{activeEvent?.label ?? "Aguardando fase técnica"}</span></div><div className="timeline live-timeline" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); seek(((event.clientX - rect.left) / rect.width) * duration); }}><i style={{ width: `${duration ? currentTime / duration * 100 : 0}%` }} />{allEvents.map((event, index) => <em key={event.id} title={`${event.label} · ${clock(event.time)}`} style={{ left: `${duration ? event.time / duration * 100 : 0}%`, background: zoneDistribution[index % zoneDistribution.length].color }} />)}</div></div>
       <div className="live-metrics"><div><span>MOVIMENTO AGORA</span><b>{sample?.motion ?? 0}<small>/100</small></b><i style={{ width: `${sample?.motion ?? 0}%` }} /></div><div><span>CADÊNCIA ESTIMADA</span><b>{liveCadence}<small> ciclos/min</small></b><em>{analysis ? "janela temporal" : "-"}</em></div><div><span>CICLOS DETECTADOS</span><b>{detectedNow}<small> / {analysis?.metrics.detectedCycles ?? 0}</small></b><em>até este quadro</em></div><div><span>ÍNDICE TÉCNICO</span><b>{analysis?.metrics.technicalIndex ?? 0}<small>/100</small></b><em>{analysis?.metrics.rhythmConsistency ?? 0}% consistência</em></div></div>
-      <div className="marker-buttons">{markers.map((marker, index) => <button key={marker} onClick={() => void addMarker(marker, index)}><span style={{ background: zoneDistribution[index].color }}>{marker[0]}</span>{marker}<Plus size={14} /></button>)}</div><label className="review-note"><span>Feedback para o atleta</span><textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Registre a evidência técnica e a próxima ação…" /></label></div>
-      <aside className="review-sidebar"><span className="eyebrow">LINHA DO TEMPO · {allEvents.length} EVENTOS</span>{allEvents.slice(0, 14).map((event, index) => <button className={`analysis-event ${Math.abs(event.time - currentTime) < .5 ? "active" : ""}`} key={event.id} onClick={() => seek(event.time)}><span style={{ background: zoneDistribution[index % zoneDistribution.length].color }}>{event.category === "stroke" ? "C" : event.label[0]}</span><div><b>{event.label}</b><small>{clock(event.time)} · {event.confidence}% confiança</small><p>{event.category === "stroke" ? "Pico de movimento detectado no ciclo." : "Fase sugerida para validação técnica."}</p></div></button>)}</aside></div>
+      <div className="marker-buttons">{markers.map((marker, index) => <button key={marker} onClick={() => void addMarker(marker, index)}><span style={{ background: zoneDistribution[index].color }}>{marker[0]}</span>{marker}<Plus size={14} /></button>)}<button type="button" className="marker-ai-button" onClick={() => void requestAiSummary()} disabled={aiBusy || !analysis} title="Interpretação da análise pelo assistente da plataforma"><Sparkles size={14} />{aiBusy ? "Analisando…" : "Resumo da IA"}</button></div>
+      {(aiSummary || aiError) && <div className={aiError ? "ai-summary ai-summary-error" : "ai-summary"} role={aiError ? "alert" : "status"}>{aiError ? aiError : <><b>Leitura da IA</b><p>{aiSummary}</p></>}</div>}
+      <label className="review-note"><span>Feedback para o atleta</span><textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Registre a evidência técnica e a próxima ação…" /></label></div>
+      <aside className="review-sidebar">
+        {analysis?.people?.length ? <div className="tracked-athletes"><span className="eyebrow">ATLETAS RASTREADOS · {analysis.people.length}</span>{analysis.people.slice(0, 6).map((person, index) => <div className="tracked-athlete-row" key={person.id}><span className="tracked-athlete-dot" style={{ background: TRACK_COLORS[index % TRACK_COLORS.length] }} /><div><b>Atleta #{person.id}</b><small>{person.strokes} braçadas · {person.strokeRate || 0}/min · {person.avgSpeed} {analysis.metadata.units ?? "px"}/s</small></div><em>{Math.round(person.meanConfidence * 100)}% conf · {person.coverage}% cob</em></div>)}</div> : null}
+        <span className="eyebrow">LINHA DO TEMPO · {allEvents.length} EVENTOS</span>{allEvents.slice(0, 14).map((event, index) => <button className={`analysis-event ${Math.abs(event.time - currentTime) < .5 ? "active" : ""}`} key={event.id} onClick={() => seek(event.time)}><span style={{ background: zoneDistribution[index % zoneDistribution.length].color }}>{event.category === "stroke" ? "C" : event.label[0]}</span><div><b>{event.label}</b><small>{clock(event.time)} · {event.confidence}% confiança</small><p>{event.category === "stroke" ? "Pico de movimento detectado no ciclo." : "Fase sugerida para validação técnica."}</p></div></button>)}</aside></div>
      {saveError && <p className="modal-error review-save-error" role="alert">{saveError}</p>}<footer className="modal-footer"><div className="analysis-summary"><Sparkles size={15} /><span><b>{analysis?.metrics.detectedCycles ?? 0} ciclos</b> · cadência {analysis?.metrics.estimatedCadence ?? 0}/min · consistência {analysis?.metrics.rhythmConsistency ?? 0}%{analysis ? ` · motor ${analysis.engine}` : ""}</span></div><button className="secondary-button" onClick={onClose}>Fechar</button><button className="primary-button" onClick={() => void save()}><Check size={16} />Salvar revisão</button></footer>
   </ModalShell>;
 }
 
-export function LiveAnalysisModal({ onClose }: { onClose: () => void }) {
-  return <ModalShell title="Análise ao vivo" subtitle="Pose, identificação de atletas e métricas biomecânicas em tempo real" onClose={onClose} wide className="live-analysis-modal">
+/**
+ * Prompt do resumo pela IA: serializa a análise de visão em números que o
+ * assistente consegue interpretar, sem enviar vídeo ou dados além da análise.
+ */
+export function buildVisionSummaryPrompt(analysis: MotionAnalysis): string {
+  const people = (analysis.people ?? []).slice(0, 6).map((person) =>
+    `- Atleta #${person.id}: ${person.strokes} braçadas em ${person.durationSeconds} s (${person.strokeRate || 0}/min, consistência ${person.rhythmConsistency}%), velocidade média ${person.avgSpeed} ${analysis.metadata.units ?? "px"}/s, distância ${person.distance}, ${person.distancePerStroke} por braçada, índice técnico ${person.technicalIndex}/100, confiança média ${Math.round(person.meanConfidence * 100)}%, cobertura ${person.coverage}%${person.strokeSignal ? ` (sinal de braçada: ${person.strokeSignal})` : ""}`,
+  ).join("\n");
+  return [
+    `Interprete para o treinador a análise do motor ${analysis.engine} ${analysis.engineVersion} deste vídeo de natação.`,
+    `Vídeo: ${analysis.metadata.durationSeconds} s, ${analysis.metadata.width}×${analysis.metadata.height} a ${analysis.metadata.fps} fps${analysis.metadata.calibrated ? ", calibrado em metros" : ", sem calibração (unidades em pixels)"}.`,
+    `Métricas gerais: ${analysis.metrics.detectedCycles} ciclos, cadência ${analysis.metrics.estimatedCadence}/min, consistência rítmica ${analysis.metrics.rhythmConsistency}%, índice técnico ${analysis.metrics.technicalIndex}/100.`,
+    people ? `Atletas rastreados:\n${people}` : "Nenhum atleta rastreado individualmente.",
+    "Traga: (1) leitura objetiva do desempenho, (2) riscos técnicos que os números sugerem, (3) dois ou três ajustes concretos para o próximo treino. As métricas são apoio objetivo - a decisão técnica é do treinador. Seja específico e cite os números.",
+  ].join("\n\n");
+}
+
+export function LiveAnalysisModal({ onClose }: { onClose: () => void }) {  return <ModalShell title="Análise ao vivo" subtitle="Pose, identificação de atletas e métricas biomecânicas em tempo real" onClose={onClose} wide className="live-analysis-modal">
     <LiveAnalysis />
   </ModalShell>;
 }

@@ -2466,3 +2466,19 @@ body :is(.athlete-row b, .create-options strong, .session-strip strong,
   .live-source-group { width: 100%; justify-content: flex-start; }
   .live-metric-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ── Atletas rastreados pelo AquaVision (revisão de vídeo) ──── */
+.tracked-athletes { display: grid; gap: 7px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--soft-line); }
+.tracked-athlete-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 10px; background: #fbfdfd; }
+.tracked-athlete-dot { width: 12px; height: 12px; border-radius: 50%; }
+.tracked-athlete-row b { font-size: var(--type-control); font-weight: 650; }
+.tracked-athlete-row small { display: block; color: var(--muted); font-size: var(--type-micro); margin-top: 2px; }
+.tracked-athlete-row em { font-style: normal; color: var(--muted); font-size: var(--type-micro); text-align: right; }
+
+/* ── Resumo da IA sobre a análise de visão ─────────────────── */
+.marker-ai-button { display: flex; align-items: center; gap: 7px; border: 1px solid #9bd2c8; border-radius: 10px; background: var(--teal-soft); color: var(--teal-dark); font-weight: 650; cursor: pointer; padding: 8px 12px; }
+.marker-ai-button:disabled { cursor: wait; opacity: .6; }
+.ai-summary { display: grid; gap: 6px; margin-top: 12px; padding: 13px 15px; border: 1px solid #9bd2c8; border-left: 3px solid var(--teal); border-radius: 10px; background: #f4faf8; color: var(--ink); }
+.ai-summary b { font-size: var(--type-caption); letter-spacing: .08em; color: var(--teal-dark); }
+.ai-summary p { font-size: var(--type-body); line-height: var(--leading-body); white-space: pre-wrap; }
+.ai-summary-error { border-color: #e3b4b1; border-left-color: var(--coral); background: #fdf6f5; color: var(--ink); }

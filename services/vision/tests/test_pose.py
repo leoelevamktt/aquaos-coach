@@ -22,6 +22,7 @@ def make_settings(tmp_path: Path) -> Settings:
         mode="balanced",
         host="127.0.0.1",
         port=8800,
+        refinement=False,
     )
 
 

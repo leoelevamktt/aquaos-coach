@@ -1,11 +1,22 @@
 # AquaVision - serviço de visão
 
 Microservice Python (FastAPI) que analisa vídeos de natação com pose one-stage
-**RTMO** (OpenMMLab, Apache-2.0, via `rtmlib`/ONNX Runtime), rastreio
-multi-atleta estilo **BYTE** com filtro de Kalman, suavização zero-fase
-Savitzky-Golay e calibração opcional por homografia para métricas em metros.
-A API Node chama `POST /analyze` e cai no AquaMotion (FFmpeg) se este serviço
-estiver indisponível.
+**RTMO** (OpenMMLab, Apache-2.0, via `rtmlib`/ONNX Runtime), refinada por
+**RTMPose top-down** no crop de cada atleta rastreado, rastreio multi-atleta
+estilo **BYTE** com filtro de Kalman, suavização zero-fase Savitzky-Golay e
+calibração opcional por homografia para métricas em metros. A API Node chama
+`POST /analyze` e cai no AquaMotion (FFmpeg) se este serviço estiver
+indisponível.
+
+O refinamento top-down roda uma segunda inferência por atleta sobre o crop da
+própria caixa (prevista pelo Kalman quando a detecção enfraquece): keypoints de
+alta resolução durante submersão parcial e recuperação de amostras quando a
+pose no crop é inequívoca (>= 8 keypoints válidos com confiança média >= 0,5).
+Desligue com `VISION_REFINEMENT=0` ou `{"refinement": false}` na requisição.
+
+A resposta inclui `keyframes` (pose por atleta a ~6 Hz, no espaço do vídeo
+original, no máximo 600 amostras): a UI interpola e desenha o esqueleto em
+tempo real sincronizado com o player.
 
 ## Rodar
 
@@ -50,10 +61,11 @@ Os testes rodam sem o modelo real (pose injetável + vídeos sintéticos).
 
 | Variável | Padrão | Descrição |
 |---|---|---|
-| `VISION_MODEL_DIR` | `./models` | Cache dos pesos ONNX (~85 MB no 1º início) |
+| `VISION_MODEL_DIR` | `./models` | Cache dos pesos ONNX (RTMO ~85 MB + RTMPose ~50 MB) |
 | `VISION_MEDIA_ROOT` | `apps/api/storage/uploads` | Raiz para caminhos relativos |
 | `VISION_DEVICE` | `cpu` | Dispositivo do ONNX Runtime (`cpu`, `cuda:0`) |
 | `VISION_MODE` | `balanced` | `lightweight` (rtmo-s), `balanced` (rtmo-m), `performance` (rtmo-l) |
+| `VISION_REFINEMENT` | `1` | Refinamento top-down RTMPose por atleta (`0` desliga) |
 | `VISION_HOST`/`VISION_PORT` | `0.0.0.0`/`8800` | Bind do uvicorn |
 
 ## Notas de precisão

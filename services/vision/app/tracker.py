@@ -118,6 +118,10 @@ class Track:
         self.time_since_update = 0
         self.age = 1
         self.state = "tentative"
+        # Permanece true após a confirmação: `confirmed` vira false quando o
+        # track morre, e o arquivamento em `finished` precisa saber que ele
+        # já teve identidade estabelecida.
+        self.established = False
         self.history: list[TrackSample] = [
             TrackSample(frame_index, timestamp, detection.bbox.copy(), detection.keypoints.copy(), detection.keypoint_scores.copy(), detection.score, self._has_pose(detection))
         ]
@@ -137,6 +141,7 @@ class Track:
             self.hits += 1
             if self.hits >= self.n_init:
                 self.state = "confirmed"
+                self.established = True
         self.history.append(
             TrackSample(frame_index, timestamp, detection.bbox.copy(), detection.keypoints.copy(), detection.keypoint_scores.copy(), detection.score, self._has_pose(detection))
         )
@@ -196,7 +201,7 @@ class ByteTracker:
 
     high_thresh: float = 0.40
     low_thresh: float = 0.12
-    init_thresh: float = 0.45
+    init_thresh: float = 0.55
     iou_threshold: float = 0.20
     max_age: int = 30
     n_init: int = 3
@@ -236,7 +241,7 @@ class ByteTracker:
 
         # Fragmentos confirmados que morreram ficam disponíveis para a costura
         # pós-varredura (o mesmo atleta reaparece com novo ID após submersão).
-        self.finished.extend(track for track in self.tracks if track.deleted and track.confirmed)
+        self.finished.extend(track for track in self.tracks if track.deleted and track.established)
         self.tracks = [track for track in self.tracks if not track.deleted]
         return [track for track in self.tracks if track.confirmed and track.time_since_update == 0]
 
