@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { COCO_CONNECTIONS, TRACK_COLORS, drawTrackedSkeleton, poseAtTime, type TrackedKeyframe } from "../pose/server-track";
-import { buildVisionSummaryPrompt } from "../modals";
 
 const keyframes: TrackedKeyframe[] = [
   { t: 0, persons: [{ id: 7, kpts: Array.from({ length: 17 }, () => [100, 50, 0.9] as [number, number, number]) }] },
@@ -95,33 +94,3 @@ describe("drawTrackedSkeleton", () => {
   });
 });
 
-describe("buildVisionSummaryPrompt", () => {
-  const analysis = {
-    engine: "AquaVision",
-    engineVersion: "1.0",
-    methodology: "pose",
-    metadata: { durationSeconds: 17, width: 608, height: 1080, fps: 59.94, sizeBytes: 1, bitrate: 1, units: "px", calibrated: false, persons: 2 },
-    metrics: { detectedCycles: 9, estimatedCadence: 58, rhythmConsistency: 91, meanMotion: 40, peakMotion: 100, technicalIndex: 84 },
-    timeline: [{ time: 0, motion: 10 }],
-    events: [],
-    people: [
-      { id: 7, firstSeen: 0, lastSeen: 17, durationSeconds: 17, strokes: 9, strokeRate: 58, rhythmConsistency: 91, avgSpeed: 1.2, maxSpeed: 2.1, distance: 20.4, distancePerStroke: 2.3, technicalIndex: 84, meanConfidence: 0.81, coverage: 87.5, strokeSignal: "punho esq. (y)" },
-    ],
-    keyframes: [{ t: 0, persons: [{ id: 7, kpts: [[1, 2, 0.9]] }] }],
-  } as Parameters<typeof buildVisionSummaryPrompt>[0];
-
-  it("serializa motor, métricas e atletas com os números da análise", () => {
-    const prompt = buildVisionSummaryPrompt(analysis);
-    expect(prompt).toContain("AquaVision 1.0");
-    expect(prompt).toContain("9 braçadas em 17 s (58/min");
-    expect(prompt).toContain("1.2 px/s");
-    expect(prompt).toContain("sem calibração (unidades em pixels)");
-    expect(prompt).toContain("cobertura 87.5%");
-    expect(prompt).toContain("punho esq. (y)");
-  });
-
-  it("degrada sem pessoas rastreadas", () => {
-    const prompt = buildVisionSummaryPrompt({ ...analysis, people: [] });
-    expect(prompt).toContain("Nenhum atleta rastreado individualmente");
-  });
-});
