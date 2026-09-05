@@ -27,7 +27,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Análise AquaVision via linha de comando")
     parser.add_argument("video", help="caminho do vídeo")
     parser.add_argument("--calibration", help="JSON com pontos imagem->mundo", default=None)
-    parser.add_argument("--target-fps", type=float, default=10.0)
+    parser.add_argument("--target-fps", type=float, default=12.0)
+    parser.add_argument("--no-refinement", action="store_true", help="desliga o refinamento top-down")
     parser.add_argument("--json", help="escreve a análise completa neste arquivo", default=None)
     args = parser.parse_args()
 
@@ -39,6 +40,7 @@ def main() -> None:
         _parse_calibration(args.calibration),
         AnalyzeOptions(target_fps=args.target_fps),
         on_progress=lambda value, stage: print(f"[{value:5.1f}%] {stage}"),
+        refine=None if args.no_refinement else engine.load_refinement(),
     )
     print(json.dumps({key: analysis[key] for key in ("engine", "metadata", "metrics")}, ensure_ascii=False, indent=2))
     for person in analysis["people"]:

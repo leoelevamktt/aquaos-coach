@@ -47,6 +47,7 @@ class AnalyzeRequest(BaseModel):
     calibration: CalibrationSpec | None = None
     targetFps: float | None = Field(None, ge=4, le=30)
     minTrackSeconds: float | None = Field(None, ge=0.5, le=60)
+    refinement: bool | None = None
 
 
 class HealthResponse(BaseModel):
@@ -76,6 +77,7 @@ def create_app(settings: Settings | None = None, pose: object | None = None) -> 
         if pose_engine is not None:
             try:
                 pose_engine.load()
+                pose_engine.load_refinement()  # opcional: falha não derruba o serviço
             except VisionUnavailable:
                 # Serviço sobe degradado: /analyze responde 503 e a API usa o fallback.
                 pass
@@ -95,11 +97,14 @@ def create_app(settings: Settings | None = None, pose: object | None = None) -> 
     async def analyze(request: AnalyzeRequest):
         if pose_engine is None:
             model = pose
+            refine_model = None
         else:
             try:
                 model = pose_engine.get()
             except VisionUnavailable as error:
                 raise HTTPException(status_code=503, detail=str(error)) from error
+            wants_refinement = request.refinement if request.refinement is not None else settings.refinement
+            refine_model = pose_engine.load_refinement() if wants_refinement else None
 
         video_path = resolve_media_path(request.path, settings.media_root)
         calibration_points = None
@@ -113,7 +118,7 @@ def create_app(settings: Settings | None = None, pose: object | None = None) -> 
                 raise HTTPException(status_code=422, detail="Calibração inválida: homografia imprecisa ou degenerada.")
 
         options = AnalyzeOptions(
-            target_fps=request.targetFps or 10.0,
+            target_fps=request.targetFps or 12.0,
             min_track_seconds=request.minTrackSeconds or 1.5,
         )
         loop = asyncio.get_running_loop()
@@ -126,7 +131,7 @@ def create_app(settings: Settings | None = None, pose: object | None = None) -> 
             # Inference libera o GIL; o lock asyncio serializa análises sem bloquear o loop.
             return await loop.run_in_executor(
                 None,
-                functools.partial(analyze_video, str(video_path), model, calibration_points, options),
+                functools.partial(analyze_video, str(video_path), model, calibration_points, options, None, refine_model),
             )
         except NoPeopleDetected as error:
             raise HTTPException(status_code=422, detail=str(error)) from error

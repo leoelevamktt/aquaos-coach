@@ -186,6 +186,141 @@ REGRAS:
 6. Formate respostas curtas e escaneáveis: use listas quando houver vários itens, negrito para destaques via **texto**.
 7. Você pode falar de qualquer tema da plataforma: atletas, prontidão corporal, treinos, biblioteca, temporadas, competições, índices, vídeos, habilidades técnicas, metas, volumes, alertas, conectores, comissão, grupos, zonas e configurações.`;
 
+/**
+ * Prompt do treinador-chefe de seleção nacional para a análise de vídeo.
+ * O assistente "assiste" ao vídeo através dos dados de rastreamento do
+ * AquaVision (pose COCO-17, tracking, braçadas, velocidades) - interpreta
+ * evidência objetiva, nunca inventa o que os dados não mostram.
+ */
+export const VISION_COACH_PROMPT = `Você é o treinador-chefe de uma seleção nacional de natação, com mais de 25 anos de experiência em natação de alto rendimento: biomecânica dos quatro nados e do medley, análise de prova (saídas, viradas, braçadas, chegadas), periodização e preparação de atletas olímpicos.
+
+PAPEL NESTA PLATAFORMA: você analisa vídeos de treino e prova através do rastreamento computacional do motor AquaVision - esqueleto (17 keypoints), identidade e trajetória de cada atleta, braçadas detectadas, cadência, velocidade e distância. Os dados abaixo são a sua "visão" do vídeo.
+
+REGRAS:
+1. Responda em português do Brasil, direto e técnico, como falaria com sua comissão na borda da piscina.
+2. Interprete APENAS os números fornecidos. Nunca invente atletas, tempos, braçadas ou eventos que não estejam nos dados.
+3. Distinga evidência forte de fraca: cobertura e confiança baixas (atleta submerso, câmera de borda) pedem conclusões cautelosas - diga isso explicitamente.
+4. Cite os números e os tempos (em segundos) que sustentam cada afirmação.
+5. Conecte os indicadores à mecânica do nado: cadência vs. distância por braçada, consistência rítmica, variação de velocidade, assimetrias entre atletas.
+6. Prescreva ajustes concretos e priorizados; sem generalidades vazias.
+7. As métricas são apoio objetivo: a decisão final é sempre do treinador humano. Nunca presuma diagnósticos clínicos ou médicos.`;
+
+type VisionPersonRecord = {
+  id: number; firstSeen: number; lastSeen: number; durationSeconds: number; strokes: number;
+  strokeRate: number; rhythmConsistency: number; avgSpeed: number; maxSpeed: number;
+  distance: number; distancePerStroke: number; technicalIndex: number; meanConfidence: number;
+  coverage: number; strokeSignal?: string | null; strokeTimes?: number[];
+};
+
+export type VisionAnalysisRecord = {
+  engine?: string; engineVersion?: string; methodology?: string;
+  metadata?: { durationSeconds?: number; width?: number; height?: number; fps?: number; units?: string; calibrated?: boolean; persons?: number; sampleFps?: number };
+  metrics?: { detectedCycles?: number; estimatedCadence?: number; rhythmConsistency?: number; meanMotion?: number; peakMotion?: number; technicalIndex?: number };
+  timeline?: Array<{ time: number; motion: number }>;
+  events?: Array<{ id: string; time: number; category: string; label: string; confidence: number }>;
+  people?: VisionPersonRecord[];
+  keyframes?: Array<{ t: number; persons: Array<{ id: number; kpts: number[][] }> }>;
+};
+
+function visionHeader(analysis: VisionAnalysisRecord, title: string): string {
+  const meta = analysis.metadata ?? {};
+  return [
+    `VÍDEO: ${esc(title)} · ${esc(meta.durationSeconds ?? 0)} s · ${esc(meta.width)}×${esc(meta.height)} a ${esc(meta.fps)} fps`,
+    `MOTOR: ${esc(analysis.engine)} ${esc(analysis.engineVersion)} · amostragem ${esc(meta.sampleFps)} Hz · ${meta.calibrated ? "calibrado em metros" : `sem calibração (unidades: ${esc(meta.units ?? "px")})`}`,
+  ].join("\n");
+}
+
+/** Contexto completo do vídeo: métricas por atleta, timeline de braçadas e perfil de movimento. */
+export function buildVisionCoachContext(analysis: VisionAnalysisRecord, title: string): string {
+  const meta = analysis.metadata ?? {};
+  const metrics = analysis.metrics ?? {};
+  const sections = [
+    visionHeader(analysis, title),
+    `MÉTRICAS GERAIS: ${esc(metrics.detectedCycles ?? 0)} ciclos detectados · cadência ${esc(metrics.estimatedCadence ?? 0)}/min · consistência rítmica ${esc(metrics.rhythmConsistency ?? 0)}% · índice técnico ${esc(metrics.technicalIndex ?? 0)}/100`,
+  ];
+  const people = analysis.people ?? [];
+  if (people.length) {
+    sections.push(`ATLETAS RASTREADOS (${people.length}):\n${people.slice(0, 6).map((person) => {
+      const strokeTimes = (person.strokeTimes ?? []).slice(0, 60);
+      const extra = (person.strokeTimes ?? []).length > 60 ? " …" : "";
+      return [
+        `- Atleta #${person.id}: presente de ${esc(person.firstSeen)} s a ${esc(person.lastSeen)} s (${esc(person.durationSeconds)} s rastreados)`,
+        `  braçadas ${esc(person.strokes)} · cadência ${esc(person.strokeRate)}/min · consistência ${esc(person.rhythmConsistency)}% · metros por braçada ${esc(person.distancePerStroke)}`,
+        `  velocidade média ${esc(person.avgSpeed)} · pico ${esc(person.maxSpeed)} ${esc(meta.units ?? "px")}/s · distância ${esc(person.distance)} · índice técnico ${esc(person.technicalIndex)}/100`,
+        `  confiança média ${esc(Math.round(person.meanConfidence * 100))}% · cobertura de pose ${esc(person.coverage)}%${person.strokeSignal ? ` · sinal de braçada: ${esc(person.strokeSignal)}` : ""}`,
+        strokeTimes.length ? `  braçadas em: ${strokeTimes.map((time) => `${esc(time)}s`).join(", ")}${extra}` : "  sem ciclos completos detectados (janela rastreável curta ou atleta submerso)",
+      ].join("\n");
+    }).join("\n")}`);
+  } else {
+    sections.push("ATLETAS RASTREADOS: nenhum - o rastreamento não encontrou atletas com evidência suficiente neste vídeo.");
+  }
+  const timeline = analysis.timeline ?? [];
+  if (timeline.length) {
+    const buckets = Math.min(12, Math.max(4, Math.round(timeline.length / 8)));
+    const size = Math.max(1, Math.ceil(timeline.length / buckets));
+    const profile: string[] = [];
+    for (let index = 0; index < timeline.length; index += size) {
+      const chunk = timeline.slice(index, index + size);
+      profile.push(`${chunk[0].time.toFixed(1)}-${chunk[chunk.length - 1].time.toFixed(1)}s: movimento médio ${Math.round(chunk.reduce((sum, item) => sum + item.motion, 0) / chunk.length)}/100`);
+    }
+    sections.push(`PERFIL DE MOVIMENTO AO LONGO DO VÍDEO:\n${profile.join("\n")}`);
+  }
+  const strokes = (analysis.events ?? []).filter((event) => event.category === "stroke");
+  if (strokes.length) {
+    sections.push(`EVENTOS DE BRAÇADA (${strokes.length}): ${strokes.slice(0, 40).map((event) => `${event.time.toFixed(1)}s`).join(", ")}${strokes.length > 40 ? " …" : ""}`);
+  }
+  return sections.join("\n\n");
+}
+
+/** Contexto da janela ao vivo: quem está no quadro agora, o que acabou de acontecer. */
+export function buildLiveWindowContext(analysis: VisionAnalysisRecord, currentTime: number, windowSeconds = 4): string {
+  const meta = analysis.metadata ?? {};
+  const from = Math.max(0, currentTime - windowSeconds);
+  const to = currentTime + 1;
+  const frames = (analysis.keyframes ?? []).filter((frame) => frame.t >= from && frame.t <= to);
+  const presence = new Map<number, { frames: number; lastSeen: number; confidence: number; x0: number; x1: number; y0: number; y1: number }>();
+  for (const frame of frames) {
+    for (const person of frame.persons) {
+      const nose = person.kpts?.[0];
+      if (!nose || nose.length < 3) continue;
+      const entry = presence.get(person.id) ?? { frames: 0, lastSeen: frame.t, confidence: 0, x0: nose[0], x1: nose[0], y0: nose[1], y1: nose[1] };
+      entry.frames += 1;
+      entry.lastSeen = Math.max(entry.lastSeen, frame.t);
+      entry.confidence += nose[2];
+      entry.x0 = entry.frames === 1 ? nose[0] : entry.x0;
+      entry.y0 = entry.frames === 1 ? nose[1] : entry.y0;
+      entry.x1 = nose[0];
+      entry.y1 = nose[1];
+      presence.set(person.id, entry);
+    }
+  }
+  const sections = [visionHeader(analysis, "treino"), `INSTANTE ATUAL: t = ${currentTime.toFixed(1)} s (janela de análise: ${from.toFixed(1)} s a ${to.toFixed(1)} s)`];
+  if (presence.size) {
+    const lines = [...presence.entries()].map(([id, entry]) => {
+      const span = Math.max(0.1, entry.lastSeen - from);
+      const speed = Math.hypot(entry.x1 - entry.x0, entry.y1 - entry.y0) / span;
+      return `- Atleta #${id}: no quadro em ${entry.frames} amostras · confiança média do nariz ${Math.round((entry.confidence / entry.frames) * 100)}% · deslocamento estimado ${speed.toFixed(1)} ${esc(meta.units ?? "px")}/s`;
+    });
+    sections.push(`ATLETAS NO QUADRO AGORA:\n${lines.join("\n")}`);
+  } else {
+    sections.push("ATLETAS NO QUADRO AGORA: nenhum com pose confiável nesta janela (atleta possivelmente submerso ou fora do quadro).");
+  }
+  const strokes = (analysis.events ?? []).filter((event) => event.category === "stroke" && event.time >= from && event.time <= to);
+  sections.push(strokes.length
+    ? `BRAÇADAS NESTA JANELA: ${strokes.map((event) => `${event.time.toFixed(1)}s`).join(", ")}`
+    : "BRAÇADAS NESTA JANELA: nenhuma detectada.");
+  const timeline = analysis.timeline ?? [];
+  const near = timeline.filter((item) => item.time >= from && item.time <= to);
+  if (near.length) {
+    sections.push(`MOVIMENTO NA JANELA: média ${Math.round(near.reduce((sum, item) => sum + item.motion, 0) / near.length)}/100`);
+  }
+  const people = analysis.people ?? [];
+  if (people.length) {
+    sections.push(`MÉTRICAS GLOBAIS POR ATLETA (vídeo inteiro):\n${people.slice(0, 6).map((person) => `- Atleta #${person.id}: ${person.strokes} braçadas · ${person.strokeRate}/min · ${person.avgSpeed} ${esc(meta.units ?? "px")}/s · índice técnico ${person.technicalIndex}/100`).join("\n")}`);
+  }
+  return sections.join("\n\n");
+}
+
 async function callLLm(messages: Array<{ role: string; content: string }>): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90_000);
@@ -289,6 +424,62 @@ export function registerAiRoutes(app: FastifyInstance, store: ManagedStore) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha ao consultar o modelo";
       return reply.code(502).send({ error: `Não consegui responder agora: ${message}` });
+    }
+  });
+
+  /** Relatório técnico completo do vídeo, com a persona de treinador de seleção. */
+  app.post("/api/v1/ai/vision-coach/report", async (request, reply) => {
+    const user = await getSession(sessionToken(request));
+    if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação exclusiva da comissão técnica" : "Autenticação necessária" });
+    const body = (await request.body) as { videoId?: string } | null;
+    const videoId = typeof body?.videoId === "string" ? body.videoId.trim() : "";
+    if (!videoId) return reply.code(400).send({ error: "Informe o vídeo a analisar." });
+    const record = store.get("videos", videoId);
+    if (!record || record.organizationId !== user!.organizationId) return reply.code(404).send({ error: "Vídeo não encontrado" });
+    const analysis = record.analysis as VisionAnalysisRecord | undefined;
+    if (!analysis?.engine) return reply.code(422).send({ error: "Este vídeo ainda não tem análise de visão concluída." });
+    if (!LLM_API_KEY) return reply.code(503).send({ error: "Assistente indisponível: configure LLM_API_KEY no ambiente da API." });
+    const context = buildVisionCoachContext(analysis, String(record.title ?? record.name ?? "Vídeo de treino"));
+    const messages = [
+      { role: "system", content: `${VISION_COACH_PROMPT}\n\nMODO RELATÓRIO: você recebe os dados do vídeo INTEIRO. Produza o relatório técnico completo: (1) o que acontece no vídeo do início ao fim, (2) análise por atleta com os números, (3) riscos técnicos que os indicadores sugerem, (4) três prescrições concretas e priorizadas para o próximo treino. Use os tempos em segundos e marque claramente onde a evidência é fraca.` },
+      { role: "user", content: context },
+    ];
+    try {
+      const answer = await callLLm(messages);
+      return { reply: answer, model: LLM_MODEL, at: new Date().toISOString() };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Falha ao consultar o modelo";
+      return reply.code(502).send({ error: `Não consegui gerar o relatório: ${message}` });
+    }
+  });
+
+  /** Observação ao vivo: contexto da janela atual do player, sincronizado com a reprodução. */
+  app.post("/api/v1/ai/vision-coach/live", async (request, reply) => {
+    const user = await getSession(sessionToken(request));
+    if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação exclusiva da comissão técnica" : "Autenticação necessária" });
+    const body = (await request.body) as { videoId?: string; currentTime?: number; windowSeconds?: number } | null;
+    const videoId = typeof body?.videoId === "string" ? body.videoId.trim() : "";
+    const currentTime = Number(body?.currentTime);
+    const windowSeconds = Number(body?.windowSeconds);
+    if (!videoId) return reply.code(400).send({ error: "Informe o vídeo a analisar." });
+    if (!Number.isFinite(currentTime) || currentTime < 0) return reply.code(400).send({ error: "Instante atual inválido." });
+    if (!Number.isFinite(windowSeconds) || windowSeconds < 1 || windowSeconds > 10) return reply.code(400).send({ error: "Janela de análise inválida (1 a 10 s)." });
+    const record = store.get("videos", videoId);
+    if (!record || record.organizationId !== user!.organizationId) return reply.code(404).send({ error: "Vídeo não encontrado" });
+    const analysis = record.analysis as VisionAnalysisRecord | undefined;
+    if (!analysis?.engine) return reply.code(422).send({ error: "Este vídeo ainda não tem análise de visão concluída." });
+    if (!LLM_API_KEY) return reply.code(503).send({ error: "Assistente indisponível: configure LLM_API_KEY no ambiente da API." });
+    const context = buildLiveWindowContext(analysis, currentTime, windowSeconds);
+    const messages = [
+      { role: "system", content: `${VISION_COACH_PROMPT}\n\nMODO AO VIVO: você está acompanhando o vídeo em tempo real junto com o treinador. Comente em 2 a 4 frases objetivas o que está acontecendo NESTE instante e dê UMA correção acionável. Sem introduções, sem repetir o contexto.` },
+      { role: "user", content: context },
+    ];
+    try {
+      const answer = await callLLm(messages);
+      return { reply: answer, model: LLM_MODEL, at: new Date().toISOString(), currentTime };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Falha ao consultar o modelo";
+      return reply.code(502).send({ error: `Não consegui comentar agora: ${message}` });
     }
   });
 }

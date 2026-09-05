@@ -19,6 +19,7 @@ def make_client(media_root: Path, pose) -> TestClient:
         mode="balanced",
         host="127.0.0.1",
         port=8800,
+        refinement=False,
     )
     return TestClient(create_app(settings, pose))
 
@@ -56,7 +57,7 @@ def test_health_reports_injected_model(tmp_path):
 def test_analyze_returns_full_contract(tmp_path):
     write_video(str(tmp_path / "treino.mp4"), frames=300)
     with make_client(tmp_path, FakePose([{"start_x": 120.0, "start_y": 120.0, "speed": 20.0, "stroke_hz": 1.0}])) as client:
-        response = client.post("/analyze", json={"path": "treino.mp4"})
+        response = client.post("/analyze", json={"path": "treino.mp4", "targetFps": 10})
         assert response.status_code == 200
         payload = response.json()
         assert payload["engine"] == "AquaVision"
@@ -88,7 +89,7 @@ def test_analyze_rejects_collinear_calibration(tmp_path):
         ]
     }
     with make_client(tmp_path, FakePose([{"start_x": 120.0, "start_y": 120.0}])) as client:
-        response = client.post("/analyze", json={"path": "treino.mp4", "calibration": calibration})
+        response = client.post("/analyze", json={"path": "treino.mp4", "targetFps": 10, "calibration": calibration})
         assert response.status_code == 422
 
 
@@ -103,6 +104,6 @@ def test_analyze_accepts_valid_calibration(tmp_path):
         ]
     }
     with make_client(tmp_path, FakePose([{"start_x": 60.0, "start_y": 100.0, "speed": 100.0, "stroke_hz": 1.0}])) as client:
-        response = client.post("/analyze", json={"path": "treino.mp4", "calibration": calibration})
+        response = client.post("/analyze", json={"path": "treino.mp4", "targetFps": 10, "calibration": calibration})
         assert response.status_code == 200
         assert response.json()["metadata"]["calibrated"] is True

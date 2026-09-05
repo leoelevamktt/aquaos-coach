@@ -5,8 +5,9 @@ from __future__ import annotations
 import pytest
 
 from app.calibration import CalibrationPoint
-from app.engine import AnalyzeOptions, analyze_video
+from app.engine import KEYFRAME_OUTPUT_CAP, AnalyzeOptions, analyze_video
 from app.errors import NoPeopleDetected
+from tests.conftest import FakeRefine
 
 SQUARE = [
     CalibrationPoint(image=(0.0, 0.0), world=(0.0, 0.0)),
@@ -15,11 +16,13 @@ SQUARE = [
     CalibrationPoint(image=(0.0, 200.0), world=(0.0, 12.5)),
 ]
 
+AT_10HZ = AnalyzeOptions(target_fps=10.0)
+
 
 def test_single_swimmer_full_contract(video_factory, fake_pose_factory):
     video = video_factory(frames=300, fps=30.0)
     pose = fake_pose_factory([{"start_x": 120.0, "start_y": 120.0, "speed": 20.0, "stroke_hz": 1.0}])
-    analysis = analyze_video(video, pose)
+    analysis = analyze_video(video, pose, None, AT_10HZ)
 
     assert analysis["engine"] == "AquaVision"
     assert analysis["metadata"]["durationSeconds"] == pytest.approx(10.0, abs=0.2)
@@ -44,7 +47,7 @@ def test_single_swimmer_full_contract(video_factory, fake_pose_factory):
 def test_hidden_swimmer_keeps_single_track(video_factory, fake_pose_factory):
     video = video_factory(frames=300, fps=30.0)
     pose = fake_pose_factory([{"start_x": 120.0, "start_y": 120.0, "speed": 20.0, "stroke_hz": 1.0, "hidden": (4.0, 5.0)}])
-    analysis = analyze_video(video, pose)
+    analysis = analyze_video(video, pose, None, AT_10HZ)
     assert len(analysis["people"]) == 1
     assert analysis["people"][0]["coverage"] < 100.0
     assert analysis["people"][0]["durationSeconds"] == pytest.approx(10.0, abs=0.3)
@@ -58,7 +61,7 @@ def test_two_swimmers_produce_two_entries(video_factory, fake_pose_factory):
             {"start_x": 320.0, "start_y": 160.0, "speed": 10.0, "stroke_hz": 0.8},
         ]
     )
-    analysis = analyze_video(video, pose)
+    analysis = analyze_video(video, pose, None, AT_10HZ)
     assert analysis["metadata"]["persons"] == 2
     ids = [person["id"] for person in analysis["people"]]
     assert len(set(ids)) == 2
@@ -68,13 +71,13 @@ def test_no_person_raises(video_factory, fake_pose_factory):
     video = video_factory(frames=120, fps=30.0)
     pose = fake_pose_factory([])
     with pytest.raises(NoPeopleDetected):
-        analyze_video(video, pose)
+        analyze_video(video, pose, None, AT_10HZ)
 
 
 def test_calibration_outputs_meters(video_factory, fake_pose_factory):
     video = video_factory(frames=300, fps=30.0)
     pose = fake_pose_factory([{"start_x": 60.0, "start_y": 100.0, "speed": 100.0, "stroke_hz": 1.0}])
-    analysis = analyze_video(video, pose, SQUARE)
+    analysis = analyze_video(video, pose, SQUARE, AT_10HZ)
     assert analysis["metadata"]["calibrated"] is True
     assert analysis["metadata"]["units"] == "m"
     person = analysis["people"][0]
@@ -87,7 +90,75 @@ def test_progress_callback_reports_stages(video_factory, fake_pose_factory):
     video = video_factory(frames=300, fps=30.0)
     pose = fake_pose_factory([{"start_x": 120.0, "start_y": 120.0, "speed": 20.0, "stroke_hz": 1.0}])
     reports: list[tuple[float, str]] = []
-    analyze_video(video, pose, None, AnalyzeOptions(), on_progress=lambda value, stage: reports.append((value, stage)))
+    analyze_video(video, pose, None, AnalyzeOptions(target_fps=10.0), on_progress=lambda value, stage: reports.append((value, stage)))
     assert reports, "nenhum estágio reportado"
     assert reports[-1][0] == 100.0
     assert all(0 <= value <= 100 for value, _ in reports)
+
+
+def test_refinement_upgrades_pose_quality(video_factory, fake_pose_factory):
+    video = video_factory(frames=300, fps=30.0)
+    # Detecção fraca (0.55) no one-stage; refinamento devolve 0.85 no crop.
+    pose = fake_pose_factory([{"start_x": 120.0, "start_y": 120.0, "speed": 20.0, "stroke_hz": 1.0, "confidence": 0.55}])
+    weak = analyze_video(video, pose, None, AT_10HZ)
+    assert weak["people"][0]["meanConfidence"] == pytest.approx(0.55, abs=0.03)
+
+    pose_strong = fake_pose_factory([{"start_x": 120.0, "start_y": 120.0, "speed": 20.0, "stroke_hz": 1.0, "confidence": 0.55}])
+    refined = analyze_video(video, pose_strong, None, AT_10HZ, refine=FakeRefine(sample_rate=10.0))
+    assert refined["people"][0]["meanConfidence"] == pytest.approx(0.85, abs=0.03)
+    assert refined["metrics"]["detectedCycles"] >= 8
+
+
+def test_refinement_recovers_long_submersion(video_factory, fake_pose_factory):
+    video = video_factory(frames=300, fps=30.0)
+    swimmer = {"start_x": 120.0, "start_y": 120.0, "speed": 20.0, "stroke_hz": 1.0, "hidden": (4.0, 8.0)}
+    # Sem refinamento: a costura mantém o mesmo atleta, mas os 4 s de submersão
+    # ficam sem pose (cobertura cai para ~60%).
+    fragmented = analyze_video(video, fake_pose_factory([swimmer]), None, AT_10HZ)
+    assert len(fragmented["people"]) == 1
+    assert fragmented["people"][0]["coverage"] < 70.0
+    assert fragmented["people"][0]["durationSeconds"] == pytest.approx(10.0, abs=0.4)
+
+    # Com refinamento: a pose no crop previsto pelo Kalman mantém cobertura contínua.
+    recovered = analyze_video(video, fake_pose_factory([swimmer]), None, AT_10HZ, refine=FakeRefine(sample_rate=10.0))
+    assert len(recovered["people"]) == 1
+    assert recovered["people"][0]["durationSeconds"] == pytest.approx(10.0, abs=0.4)
+    assert recovered["people"][0]["coverage"] >= 90.0
+
+
+def test_refinement_failure_is_tolerated(video_factory, fake_pose_factory):
+    video = video_factory(frames=300, fps=30.0)
+    pose = fake_pose_factory([{"start_x": 120.0, "start_y": 120.0, "speed": 20.0, "stroke_hz": 1.0}])
+
+    def broken_refine(frame, bboxes=None):
+        raise RuntimeError("modelo de refinamento indisponível")
+
+    analysis = analyze_video(video, pose, None, AT_10HZ, refine=broken_refine)
+    assert analysis["engine"] == "AquaVision"
+    assert analysis["metrics"]["detectedCycles"] >= 8
+
+
+def test_keyframes_contract(video_factory, fake_pose_factory):
+    video = video_factory(frames=300, fps=30.0)
+    pose = fake_pose_factory([{"start_x": 120.0, "start_y": 120.0, "speed": 20.0, "stroke_hz": 1.0}])
+    analysis = analyze_video(video, pose, None, AT_10HZ)
+    keyframes = analysis["keyframes"]
+    assert keyframes, "keyframes não podem ficar vazios com atleta rastreado"
+    times = [frame["t"] for frame in keyframes]
+    assert times == sorted(times)
+    # Saída limitada a ~6 Hz: o player interpola entre amostras.
+    assert all(b - a >= 0.19 for a, b in zip(times, times[1:]))
+    for frame in keyframes:
+        for person in frame["persons"]:
+            assert len(person["kpts"]) == 17
+            assert all(len(kpt) == 3 for kpt in person["kpts"])
+    # Coordenadas no espaço do vídeo original: nariz segue a trajetória do atleta.
+    first = keyframes[0]["persons"][0]["kpts"][0]
+    assert first[0] == pytest.approx(120.0, abs=8.0)
+
+
+def test_keyframes_are_capped(video_factory, fake_pose_factory):
+    video = video_factory(frames=3600, fps=30.0)  # 120 s
+    pose = fake_pose_factory([{"start_x": 120.0, "start_y": 120.0, "speed": 4.0, "stroke_hz": 1.0}])
+    analysis = analyze_video(video, pose, None, AT_10HZ)
+    assert len(analysis["keyframes"]) <= KEYFRAME_OUTPUT_CAP

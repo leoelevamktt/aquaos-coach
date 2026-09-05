@@ -68,6 +68,31 @@ class FakePose:
         return np.stack(keypoints), np.stack(scores)
 
 
+class FakeRefine:
+    """Refinamento top-down determinístico: esqueleto completo dentro da caixa."""
+
+    def __init__(self, swimmers: int = 1, sample_rate: float = 10.0, confidence: float = 0.85):
+        self.swimmers = swimmers
+        self.sample_rate = sample_rate
+        self.confidence = confidence
+        self.calls = 0
+
+    def __call__(self, frame, bboxes=None):
+        time = self.calls / self.sample_rate
+        self.calls += 1
+        keypoints: list[np.ndarray] = []
+        scores: list[np.ndarray] = []
+        for bbox in bboxes or []:
+            cx = float((bbox[0] + bbox[2]) / 2.0)
+            cy = float((bbox[1] + bbox[3]) / 2.0)
+            wrist = 20.0 * np.sin(2.0 * np.pi * 1.0 * time)
+            keypoints.append(skeleton((cx, cy), wrist))
+            scores.append(np.full(17, self.confidence, dtype=np.float64))
+        if not keypoints:
+            return np.zeros((0, 17, 2)), np.zeros((0, 17))
+        return np.stack(keypoints), np.stack(scores)
+
+
 @pytest.fixture
 def video_factory(tmp_path):
     def _factory(frames: int = 300, fps: float = 30.0) -> str:

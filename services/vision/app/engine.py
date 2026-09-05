@@ -20,7 +20,7 @@ from .errors import NoPeopleDetected
 from .metrics import TrackMetrics, compute_track_metrics, motion_timeline
 from .smoothing import resample_and_smooth
 from .strokes import CANDIDATE_KEYPOINTS, StrokeStats, detect_peaks_hysteresis, select_stroke_signal, stroke_statistics
-from .tracker import KEYPOINT_VALID_THRESHOLD, ByteTracker, Detection, Track, bbox_from_keypoints, person_score, stitch_tracks
+from .tracker import KEYPOINT_VALID_THRESHOLD, ByteTracker, Detection, Track, TrackSample, bbox_from_keypoints, person_score, stitch_tracks
 
 ProgressCallback = Callable[[float, str], None]
 PoseCallable = Callable[..., tuple[np.ndarray, np.ndarray]]
@@ -28,18 +28,25 @@ PoseCallable = Callable[..., tuple[np.ndarray, np.ndarray]]
 ENGINE_NAME = "AquaVision"
 ENGINE_VERSION = "1.0"
 METHODOLOGY = (
-    "Pose one-stage RTMO (COCO-17) + rastreio BYTE com filtro de Kalman e suavização zero-fase "
-    "Savitzky-Golay. Braçadas por periodicidade dos keypoints; velocidade e distância em pixels "
-    "ou metros (com calibração). Métricas objetivas de apoio - a validação técnica permanece com o treinador."
+    "Pose one-stage RTMO (COCO-17) refinada por RTMPose top-down no crop de cada atleta rastreado, "
+    "+ rastreio BYTE com filtro de Kalman, costura de fragmentos e suavização zero-fase Savitzky-Golay. "
+    "Braçadas por periodicidade dos keypoints; velocidade e distância em pixels ou metros (com calibração). "
+    "Métricas objetivas de apoio - a validação técnica permanece com o treinador."
 )
 
 # Índices COCO-17 usados como referência de posição do atleta.
 HIP_LEFT, HIP_RIGHT, NOSE = 11, 12, 0
+KEYFRAME_OUTPUT_HZ = 6.0  # o player interpola; 6 Hz basta e mantém o payload leve
+KEYFRAME_OUTPUT_CAP = 600
+KEYFRAME_MAX_PERSONS = 6
+REFINEMENT_BOX_EXPANSION = 0.25  # margem ao redor da caixa do atleta para o crop
+REFINEMENT_MIN_VALID_KEYPOINTS = 8
+REFINEMENT_MIN_MEAN_SCORE = 0.5
 
 
 @dataclass(frozen=True)
 class AnalyzeOptions:
-    target_fps: float = 10.0
+    target_fps: float = 12.0
     max_frame_width: int = 960
     min_track_seconds: float = 1.5
     min_pose_frames: int = 10
@@ -164,12 +171,96 @@ def _analyze_track(track: Track, calibration: Calibration | None, sample_rate: f
     }
 
 
+def _valid_stats(keypoint_scores: np.ndarray) -> tuple[int, float]:
+    valid = keypoint_scores[keypoint_scores > KEYPOINT_VALID_THRESHOLD]
+    return int(valid.size), float(valid.mean()) if valid.size else 0.0
+
+
+def _expand_box(bbox: np.ndarray, frame_shape: tuple[int, int], expansion: float) -> list[float]:
+    """Caixa ampliada e clamped aos limites do quadro, para o crop de refinamento."""
+    height, width = frame_shape[:2]
+    box_width = float(bbox[2] - bbox[0])
+    box_height = float(bbox[3] - bbox[1])
+    x1 = max(0.0, float(bbox[0]) - box_width * expansion)
+    y1 = max(0.0, float(bbox[1]) - box_height * expansion)
+    x2 = min(float(width), float(bbox[2]) + box_width * expansion)
+    y2 = min(float(height), float(bbox[3]) + box_height * expansion)
+    return [x1, y1, x2, y2]
+
+
+def _refine_frame(frame: np.ndarray, tracker: ByteTracker, scale: float, timestamp: float, frame_index: int, refine) -> None:
+    """Refina a pose de cada atleta confirmado no crop da própria caixa.
+
+    Tracks pareados ganham keypoints de alta resolução; tracks submersos (sem
+    detecção neste quadro) tentam recuperação pela caixa prevista pelo Kalman -
+    só cria amostra se o RTMPose encontrar uma pose real no crop.
+    """
+    confirmed = [track for track in tracker.tracks if track.confirmed]
+    if not confirmed:
+        return
+    boxes_frame = [_expand_box(track.kalman.project() * scale, frame.shape, REFINEMENT_BOX_EXPANSION) for track in confirmed]
+    try:
+        keypoints, scores = refine(frame, bboxes=boxes_frame)
+    except Exception:  # noqa: BLE001 - refinamento nunca pode derrubar a análise
+        return
+    for track, box_frame, person_keypoints, person_scores in zip(confirmed, boxes_frame, keypoints, scores):
+        person_keypoints = np.asarray(person_keypoints, dtype=np.float64).reshape(-1, 2)
+        person_scores = np.asarray(person_scores, dtype=np.float64).reshape(-1)
+        if person_keypoints.shape[0] < 17:
+            continue
+        valid_count, mean_score = _valid_stats(person_scores)
+        matched = track.history[-1].frame_index == frame_index if track.history else False
+        if matched:
+            sample = track.history[-1]
+            current_valid, current_mean = _valid_stats(sample.keypoint_scores)
+            better = valid_count > current_valid or (valid_count == current_valid and mean_score > current_mean)
+            if better and valid_count >= REFINEMENT_MIN_VALID_KEYPOINTS:
+                sample.keypoints = person_keypoints / scale
+                sample.keypoint_scores = person_scores
+                sample.valid_pose = valid_count >= 6
+        elif valid_count >= REFINEMENT_MIN_VALID_KEYPOINTS and mean_score >= REFINEMENT_MIN_MEAN_SCORE:
+            # Recuperação por pose: o RTMPose encontrou um atleta onde a
+            # detecção one-stage falhou; a amostra entra no histórico do track.
+            track.history.append(
+                TrackSample(
+                    frame_index=frame_index,
+                    timestamp=timestamp,
+                    bbox=track.kalman.project(),
+                    keypoints=person_keypoints / scale,
+                    keypoint_scores=person_scores,
+                    score=mean_score,
+                    valid_pose=valid_count >= 6,
+                )
+            )
+            track.time_since_update = 0
+
+
+def _collect_keyframes(tracker: ByteTracker, frame_index: int, timestamp: float) -> list[dict]:
+    """Pose de cada atleta com amostra neste quadro, em pixels do vídeo original."""
+    persons = []
+    for track in tracker.tracks:
+        if not track.confirmed or not track.history:
+            continue
+        sample = track.history[-1]
+        if sample.frame_index != frame_index:
+            continue
+        kpts = [
+            [round(float(x), 1), round(float(y), 1), round(float(s), 2)]
+            for (x, y), s in zip(sample.keypoints, sample.keypoint_scores)
+        ]
+        persons.append({"id": track.track_id, "kpts": kpts})
+        if len(persons) >= KEYFRAME_MAX_PERSONS:
+            break
+    return persons
+
+
 def analyze_video(
     path: str,
     pose: PoseCallable,
     calibration_points: list[CalibrationPoint] | None = None,
     options: AnalyzeOptions | None = None,
     on_progress: ProgressCallback | None = None,
+    refine: PoseCallable | None = None,
 ) -> dict:
     """Executa o pipeline completo e devolve a análise no contrato da plataforma."""
     options = options or AnalyzeOptions()
@@ -186,6 +277,7 @@ def analyze_video(
         tracker = ByteTracker()
         frame_index = 0
         next_sample = 0
+        raw_keyframes: list[dict] = []
         _report(on_progress, 4.0, "Decodificando vídeo")
 
         while True:
@@ -213,8 +305,14 @@ def analyze_video(
                         )
                     )
                 tracker.update(detections, frame_index, timestamp)
+                if refine is not None:
+                    _refine_frame(frame, tracker, scale, timestamp, frame_index, refine)
+                persons = _collect_keyframes(tracker, frame_index, timestamp)
+                if persons:
+                    raw_keyframes.append({"t": round(timestamp, 2), "persons": persons})
                 if duration > 0 and frame_index % (step * 10) == 0:
-                    _report(on_progress, min(96.0, 4.0 + 92.0 * timestamp / duration), "Rastreando atletas com pose RTMO")
+                    stage = "Rastreando atletas com pose RTMO + refinamento top-down" if refine is not None else "Rastreando atletas com pose RTMO"
+                    _report(on_progress, min(96.0, 4.0 + 92.0 * timestamp / duration), stage)
             frame_index += 1
 
         if duration <= 0 and frame_index:
@@ -279,6 +377,11 @@ def analyze_video(
         ]
         events.sort(key=lambda event: event["time"])
 
+        # O player interpola entre amostras: 6 Hz cobre o olho humano e mantém
+        # o registro do vídeo leve no store e no SSE.
+        stride = max(1, int(np.ceil(sample_rate / KEYFRAME_OUTPUT_HZ)))
+        keyframes = raw_keyframes[::stride][:KEYFRAME_OUTPUT_CAP]
+
         bitrate = int(size * 8 / duration) if duration > 0 and size else 0
         _report(on_progress, 100.0, "Análise concluída")
         return {
@@ -310,6 +413,7 @@ def analyze_video(
             "timeline": motion_timeline(primary["times"], primary["points"], calibration),
             "events": events,
             "people": people,
+            "keyframes": keyframes,
         }
     finally:
         capture.release()

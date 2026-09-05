@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Activity, Camera, Cpu, Gauge, Radio, Sparkles, Upload, Users, X } from "lucide-react";
 import { usePoseAnalysis, type PoseStatus } from "./use-pose-analysis";
 import { drawPoseOverlay } from "./overlay";
+import { ServerTrackingLayer, type TrackedKeyframe } from "./server-track";
 import type { ModelTier } from "./engine";
 import type { AthleteMetrics } from "./metrics";
 
@@ -138,7 +139,20 @@ export function LiveAnalysis({ initialSourceUrl }: { initialSourceUrl?: string }
 }
 
 /** Camada compacta usada dentro do modal de revisão: esqueleto sobre o vídeo do acervo. */
-export function PoseTrackingLayer({ videoRef, active, numPoses = 1 }: { videoRef: React.RefObject<HTMLVideoElement | null>; active: boolean; numPoses?: number }) {
+export function PoseTrackingLayer({ videoRef, active, numPoses = 1, serverKeyframes, serverPeopleCount = 0 }: {
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  active: boolean;
+  numPoses?: number;
+  serverKeyframes?: TrackedKeyframe[];
+  serverPeopleCount?: number;
+}) {
+  // Fonte prioritária: keyframes do AquaVision (servidor) quando a análise os
+  // traz; sem eles, rastreamento MediaPipe no próprio navegador.
+  if (serverKeyframes?.length) return <ServerTrackingLayer videoRef={videoRef} active={active} keyframes={serverKeyframes} peopleCount={serverPeopleCount} />;
+  return <BrowserTrackingLayer videoRef={videoRef} active={active} numPoses={numPoses} />;
+}
+
+function BrowserTrackingLayer({ videoRef, active, numPoses = 1 }: { videoRef: React.RefObject<HTMLVideoElement | null>; active: boolean; numPoses?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const analysis = usePoseAnalysis({ enabled: active, videoRef, canvasRef, numPoses, model: "full", labelPrefix: "Atleta" });
   const athlete = analysis.athletes[0];

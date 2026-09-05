@@ -15,7 +15,7 @@ from typing import Protocol
 
 from rtmlib import RTMO
 
-from .config import Settings
+from .config import REFINEMENT_INPUT_SIZES, Settings
 from .errors import VisionUnavailable
 
 DOWNLOAD_TIMEOUT_SECONDS = 300.0
@@ -38,9 +38,17 @@ def _download(url: str, destination: Path) -> None:
 
 def ensure_model_file(settings: Settings) -> Path:
     """Garante o ONNX do modo configurado em disco e devolve o caminho local."""
-    settings.model_dir.mkdir(parents=True, exist_ok=True)
-    url = settings.model_url
-    archive = settings.model_dir / Path(url).name
+    return _ensure_onnx(settings.model_dir, settings.model_url)
+
+
+def ensure_refinement_file(settings: Settings) -> Path:
+    """ONNX do modelo top-down de refinamento (RTMPose)."""
+    return _ensure_onnx(settings.model_dir, settings.refinement_url)
+
+
+def _ensure_onnx(model_dir: Path, url: str) -> Path:
+    model_dir.mkdir(parents=True, exist_ok=True)
+    archive = model_dir / Path(url).name
     onnx = archive.with_suffix(".onnx")
     if onnx.exists():
         return onnx
@@ -77,12 +85,29 @@ def load_pose_model(settings: Settings) -> PoseModel:
         raise VisionUnavailable(f"Não foi possível carregar o modelo RTMO: {error}") from error
 
 
+def load_refinement_model(settings: Settings) -> PoseModel:
+    """Carrega o RTMPose top-down para refinamento por crop."""
+    onnx = ensure_refinement_file(settings)
+    try:
+        from rtmlib import RTMPose
+
+        return RTMPose(
+            str(onnx),
+            model_input_size=REFINEMENT_INPUT_SIZES[settings.mode],
+            backend="onnxruntime",
+            device=settings.device,
+        )
+    except Exception as error:  # noqa: BLE001
+        raise VisionUnavailable(f"Não foi possível carregar o modelo de refinamento: {error}") from error
+
+
 class PoseEngine:
-    """Carregamento preguiçoso e thread-safe do modelo, com uma única instância."""
+    """Carregamento preguiçoso e thread-safe dos modelos, uma instância cada."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self._model: PoseModel | None = None
+        self._refinement: PoseModel | None = None
         self._lock = threading.Lock()
 
     @property
@@ -94,6 +119,18 @@ class PoseEngine:
             if self._model is None:
                 self._model = load_pose_model(self.settings)
             return self._model
+
+    def load_refinement(self) -> PoseModel | None:
+        """Refinamento é opcional: falha de carga não derruba o serviço."""
+        if not self.settings.refinement:
+            return None
+        with self._lock:
+            if self._refinement is None:
+                try:
+                    self._refinement = load_refinement_model(self.settings)
+                except VisionUnavailable:
+                    return None
+            return self._refinement
 
     def get(self) -> PoseModel:
         model = self._model
