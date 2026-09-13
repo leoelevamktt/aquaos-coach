@@ -2,9 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Bot, Send, X, MessageCircle } from "lucide-react";
-import { API_URL, apiRequest } from "./api";
+import { apiRequest } from "./api";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
+type BrainReadiness = {
+  ready: boolean;
+  status: "FULLY_OPERATIONAL" | "PARTIAL";
+  constitution?: { version: string; rules: number; alwaysInjectedBeforeLlm: boolean };
+  coverage?: { sourceLayers?: { ready: number; total: number } };
+};
 
 const SUGGESTIONS = [
   "Como está a prontidão da equipe hoje?",
@@ -17,10 +23,10 @@ const SUGGESTIONS = [
 
 /** Estágios exibidos enquanto o assistente processa — dão noção de progresso. */
 const THINKING_STAGES = [
-  "Consultando os dados da plataforma…",
-  "Analisando atletas, treinos e metas…",
-  "Cruzando prontidão, volume e carga…",
-  "Redigindo a resposta…",
+  "Consultando o Cérebro RKF e os dados da plataforma…",
+  "Cruzando metodologia, histórico e contexto dos atletas…",
+  "Aplicando regras, prontidão, volume e carga…",
+  "Redigindo a resposta com rastreabilidade…",
 ];
 
 /** Sanitiza a resposta do modelo: remove cabeçalhos ##, artefatos de markdown residual e espaços duplos. */
@@ -98,6 +104,7 @@ export function AiAssistant({ embedded = false }: { embedded?: boolean }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [available, setAvailable] = useState<boolean | null>(null);
+  const [brain, setBrain] = useState<BrainReadiness | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -106,6 +113,15 @@ export function AiAssistant({ embedded = false }: { embedded?: boolean }) {
       .then((status) => setAvailable(status.available))
       .catch(() => setAvailable(false));
   }, [open, available]);
+
+  useEffect(() => {
+    if (!open || brain !== null) return;
+    apiRequest<BrainReadiness>("/api/v1/ai/brain-readiness")
+      .then((status) => setBrain(status))
+      // Atletas podem não ter permissão para ver o diagnóstico técnico; isso
+      // não deve tornar o assistente indisponível para eles.
+      .catch(() => undefined);
+  }, [open, brain]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -133,6 +149,15 @@ export function AiAssistant({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
+  const layers = brain?.coverage?.sourceLayers;
+  const connectionLabel = available === false
+    ? "offline"
+    : brain?.ready && layers
+      ? `Cérebro RKF completo · ${layers.ready}/${layers.total} fontes`
+      : brain && layers
+        ? `Cérebro RKF parcial · ${layers.ready}/${layers.total} fontes`
+        : "conectado aos dados da plataforma";
+
   if (!open) {
     return (
       <button className="ai-fab" onClick={() => setOpen(true)} aria-label="Abrir assistente de IA">
@@ -149,7 +174,7 @@ export function AiAssistant({ embedded = false }: { embedded?: boolean }) {
             <span className="ai-panel-badge"><Bot size={17} /></span>
             <div>
               <strong>RKF IA</strong>
-              <small>{available === false ? "offline" : "conectado aos dados da plataforma"}</small>
+              <small>{connectionLabel}</small>
             </div>
           </div>
           <label className="coach-field">Idioma da resposta<select value={language} onChange={e => setLanguage(e.target.value)}><option value="pt-BR">Português</option><option value="en">English</option><option value="es">Español</option><option value="fr">Français</option></select></label>{!embedded && <button className="ai-panel-close" onClick={() => setOpen(false)} aria-label="Fechar assistente"><X size={18} /></button>}
@@ -160,7 +185,9 @@ export function AiAssistant({ embedded = false }: { embedded?: boolean }) {
             <div className="ai-welcome">
               <span className="ai-welcome-icon"><MessageCircle size={22} /></span>
               <strong>Pergunte qualquer coisa da plataforma</strong>
-              <p>Atletas, treinos, metas, competições, vídeos, prontidão, volumes e auditoria. As respostas usam os registros disponíveis no momento da consulta.</p>
+              <p>{brain?.ready
+                ? "Cérebro RKF validado: metodologia, Base de Conhecimento, Catálogo Mestre, biblioteca V5.1, histórico do treinador e contexto dos atletas estão conectados. Pedidos de treino passam pelo Planning Engine antes da IA."
+                : "Atletas, treinos, metas, competições, vídeos, prontidão, volumes e auditoria. As respostas usam os registros disponíveis no momento da consulta."}</p>
               <div className="ai-suggestions">
                 {SUGGESTIONS.map((suggestion) => (
                   <button key={suggestion} onClick={() => void send(suggestion)}>{suggestion}</button>
