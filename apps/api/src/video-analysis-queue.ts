@@ -1,7 +1,7 @@
 import { extname, resolve } from "node:path";
 import type { ManagedRecord, ManagedStore } from "./managed-store.js";
 import { analyzeVideo, generateThumbnail } from "./video-analysis.js";
-import { analyzeWithVision, type VisionAnalysis, type VisionCalibrationSnapshot, type VisionFallbackReason } from "./vision-client.js";
+import { analyzeWithVision, type VisionAnalysis, type VisionAnalysisContext, type VisionCalibrationSnapshot, type VisionFallbackReason } from "./vision-client.js";
 
 type VideoJob = ManagedRecord & {
   videoId: string;
@@ -18,19 +18,52 @@ type VideoRecord = ManagedRecord & {
   filename?: string;
   analysisStatus?: string;
   analysisJobId?: string;
+  athleteId?: string;
+  event?: string;
+  cameraView?: string;
 };
 
 type VisionAttempt = {
   attemptedAt: string;
   durationMs: number;
   outcome: "success" | "fallback";
-  engine: "AquaVision";
+  engine: string;
   engineVersion?: string;
   modelVersion?: string;
   fallbackReason?: VisionFallbackReason;
 };
 
 const now = () => new Date().toISOString();
+
+function inferStrokeStyle(text: string): VisionAnalysisContext["strokeStyle"] {
+  const normalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (/\b(livre|crawl|freestyle)\b/.test(normalized)) return "livre";
+  if (/\b(costas|backstroke)\b/.test(normalized)) return "costas";
+  if (/\b(peito|breaststroke)\b/.test(normalized)) return "peito";
+  if (/\b(borboleta|butterfly|fly)\b/.test(normalized)) return "borboleta";
+  if (/\b(medley|medlei)\b/.test(normalized)) return "medley";
+  return "unknown";
+}
+
+function parsePoolLength(value: unknown): number | undefined {
+  const match = String(value ?? "").match(/\b(25|50)\s*m?\b/i);
+  return match ? Number(match[1]) : undefined;
+}
+
+function inferVisionContext(store: ManagedStore, video: VideoRecord, organizationId: string): VisionAnalysisContext {
+  const athlete = video.athleteId ? store.get("athletes", video.athleteId) : undefined;
+  const text = [video.title, video.event, athlete?.stroke].filter(Boolean).join(" ");
+  const settings = store.list("settings").find((record) => !record.organizationId || record.organizationId === organizationId);
+  const poolLengthM = parsePoolLength(settings?.primaryPool);
+  const cameraView = ["side", "front", "rear", "overhead", "underwater_side", "underwater_front", "unknown"].includes(String(video.cameraView ?? ""))
+    ? video.cameraView as VisionAnalysisContext["cameraView"]
+    : "unknown";
+  return {
+    strokeStyle: inferStrokeStyle(text),
+    cameraView,
+    ...(poolLengthM ? { poolLengthM } : {}),
+  };
+}
 
 /**
  * Fila local, serializada e persistida como recurso gerenciável. O processamento
@@ -118,16 +151,18 @@ export class VideoAnalysisQueue {
       const videoPath = resolve(this.uploadRoot, video.filename);
       const thumbnail = `${video.filename.replace(extname(video.filename), "")}-thumb.jpg`;
       const thumbnailPath = resolve(this.uploadRoot, thumbnail);
-      updateProgress(2, "Consultando motor de visão AquaVision");
+      updateProgress(2, "Consultando AquaVision Elite 2.0");
       const calibrationSnapshot = job.calibrationSnapshot as VisionCalibrationSnapshot | undefined;
-      const vision = await analyzeWithVision(videoPath, updateProgress, calibrationSnapshot);
+      const context = inferVisionContext(this.store, video, job.organizationId);
+      const vision = await analyzeWithVision(videoPath, updateProgress, calibrationSnapshot, context);
       const visionAttempt: VisionAttempt = vision.kind === "success"
-        ? { attemptedAt: now(), durationMs: vision.durationMs, outcome: "success", engine: "AquaVision", engineVersion: vision.analysis.engineVersion, modelVersion: vision.analysis.modelVersion }
-        : { attemptedAt: now(), durationMs: vision.durationMs, outcome: "fallback", engine: "AquaVision", fallbackReason: vision.fallbackReason };
+        ? { attemptedAt: now(), durationMs: vision.durationMs, outcome: "success", engine: vision.analysis.engine, engineVersion: vision.analysis.engineVersion, modelVersion: vision.analysis.modelVersion }
+        : { attemptedAt: now(), durationMs: vision.durationMs, outcome: "fallback", engine: "AquaVision Elite", fallbackReason: vision.fallbackReason };
       const visionAttempts = [...(Array.isArray(job.visionAttempts) ? job.visionAttempts : []), visionAttempt];
       // Registra a tentativa antes do processamento local, inclusive se o fallback falhar.
       this.store.update("videoAnalysisJobs", job.id, {
         visionAttempts,
+        visionContext: context,
         ...(vision.kind === "success"
           ? { engine: vision.analysis.engine, engineVersion: vision.analysis.engineVersion, modelVersion: vision.analysis.modelVersion }
           : { fallbackReason: vision.fallbackReason }),
@@ -149,12 +184,14 @@ export class VideoAnalysisQueue {
         analysisJobId: job.id,
         analysis,
         analysisCalibrationSnapshot: calibrationSnapshot,
+        analysisVisionContext: context,
         thumbnailUrl: `/uploads/${thumbnail}`,
         ...analysis.metadata,
       }, "analyze");
       this.store.update("videoAnalysisJobs", job.id, {
         status: "completed", progress: 100, stage: "Análise concluída", completedAt: now(),
         visionAttempts,
+        visionContext: context,
         engine: analysis.engine, engineVersion: analysis.engineVersion, modelVersion: "modelVersion" in analysis ? analysis.modelVersion : undefined,
         fallbackReason: vision.kind === "fallback" ? vision.fallbackReason : undefined,
         result: { videoId: video.id, analyzedAt: analysis.analyzedAt, engine: analysis.engine },
