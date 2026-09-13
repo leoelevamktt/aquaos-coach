@@ -3,6 +3,7 @@ import type { ManagedStore } from "./managed-store.js";
 import { getSession, roleAllows, sessionToken } from "./auth.js";
 import { buildRkfCatalogContext } from "./rkf-catalog-retrieval.js";
 import type { CatalogRow } from "./rkf-catalog-store.js";
+import { appendRkfKnowledgeContext, buildRkfKnowledgeContext } from "./rkf-knowledge-injection.js";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type CatalogKnowledgeStore = {
@@ -307,10 +308,13 @@ async function callLLm(messages: Array<{ role: string; content: string }>): Prom
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
+    const latestUser = [...messages].reverse().find((message) => message.role === "user")?.content;
+    const knowledge = await buildRkfKnowledgeContext(latestUser ?? "Método RKF natação treinamento planejamento análise");
+    const messagesWithKnowledge = appendRkfKnowledgeContext(messages, knowledge);
     const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${LLM_API_KEY}` },
-      body: JSON.stringify({ model: LLM_MODEL, messages, max_tokens: 1600, temperature: 0.4, stream: false }),
+      body: JSON.stringify({ model: LLM_MODEL, messages: messagesWithKnowledge, max_tokens: 1600, temperature: 0.4, stream: false }),
       signal: controller.signal,
     });
     const raw = await response.text();

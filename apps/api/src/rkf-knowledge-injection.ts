@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { extractDocument } from "./document-extraction.js";
 import { tokenizeForSearch } from "./rkf-catalog-store.js";
 
@@ -20,7 +21,6 @@ const DEFAULT_MAX_CHARS = 1_800;
 const DEFAULT_MAX_CONTEXT_CHARS = 10_500;
 const CORE_QUERY = "regras futuro agente governança fato método princípio decisão preferência hipótese inferência conflito lacuna aprovação humana não inventar unknown";
 let cache: KnowledgeCache | undefined;
-let installed = false;
 let lastWarningAt = 0;
 
 function normalize(value: string) {
@@ -32,7 +32,7 @@ function knowledgePath() {
   if (configured) return resolve(configured);
   const storageRoot = process.env.STORAGE_PATH?.trim();
   if (storageRoot) return resolve(storageRoot, "knowledge", "rkf-base.docx");
-  return new URL("../storage/knowledge/rkf-base.docx", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+  return fileURLToPath(new URL("../storage/knowledge/rkf-base.docx", import.meta.url));
 }
 
 function knowledgeRequired() {
@@ -173,48 +173,15 @@ export async function buildRkfKnowledgeContext(query: string) {
   return chunks ? buildKnowledgeContextFromChunks(chunks, query) : "";
 }
 
-function requestUrl(input: Parameters<typeof fetch>[0]) {
-  if (typeof input === "string") return input;
-  if (input instanceof URL) return input.toString();
-  return input.url;
-}
-
-/**
- * Injeta RAG da Base RKF nas chamadas OpenAI-compatible do processo.
- * O wrapper é instalado uma única vez e só altera /chat/completions.
- * A base permanece no filesystem privado do servidor; nenhum conteúdo é
- * versionado no repositório público.
- */
-export function installRkfKnowledgeInjection() {
-  if (installed) return;
-  installed = true;
-  const originalFetch = globalThis.fetch.bind(globalThis);
-
-  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-    const url = requestUrl(input);
-    if (!url.includes("/chat/completions") || typeof init?.body !== "string") return originalFetch(input, init);
-
-    let payload: { messages?: Array<{ role?: string; content?: unknown }>; [key: string]: unknown };
-    try {
-      payload = JSON.parse(init.body) as typeof payload;
-    } catch {
-      return originalFetch(input, init);
-    }
-    if (!Array.isArray(payload.messages) || !payload.messages.length) return originalFetch(input, init);
-
-    const latestUser = [...payload.messages].reverse().find((message) => message.role === "user" && typeof message.content === "string");
-    const query = typeof latestUser?.content === "string" ? latestUser.content : "Método RKF natação treinamento planejamento análise";
-    const knowledge = await buildRkfKnowledgeContext(query);
-    if (!knowledge) return originalFetch(input, init);
-
-    const messages = payload.messages.map((message) => ({ ...message }));
-    const systemIndex = messages.findIndex((message) => message.role === "system" && typeof message.content === "string");
-    if (systemIndex >= 0) {
-      messages[systemIndex] = { ...messages[systemIndex], content: `${String(messages[systemIndex].content)}\n\n${knowledge}` };
-    } else {
-      messages.unshift({ role: "system", content: knowledge });
-    }
-
-    return originalFetch(input, { ...init, body: JSON.stringify({ ...payload, messages }) });
-  }) as typeof globalThis.fetch;
+export function appendRkfKnowledgeContext<T extends { role: string; content: string }>(messages: T[], knowledge: string): T[] {
+  if (!knowledge) return messages;
+  const enriched = messages.map((message) => ({ ...message }));
+  const systemIndex = enriched.findIndex((message) => message.role === "system");
+  if (systemIndex >= 0) {
+    const system = enriched[systemIndex]!;
+    enriched[systemIndex] = { ...system, content: `${system.content}\n\n${knowledge}` };
+  } else {
+    enriched.unshift({ role: "system", content: knowledge } as T);
+  }
+  return enriched;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildKnowledgeContextFromChunks, chunkKnowledgeText, rankKnowledgeChunks } from "./rkf-knowledge-injection.js";
+import { appendRkfKnowledgeContext, buildKnowledgeContextFromChunks, chunkKnowledgeText, rankKnowledgeChunks } from "./rkf-knowledge-injection.js";
 
 describe("Base de Conhecimento RKF", () => {
   const text = [
@@ -22,5 +22,18 @@ describe("Base de Conhecimento RKF", () => {
     expect(context).toContain("HIPÓTESE");
     expect(context).toContain("nunca devem ser promovidos a fato");
     expect(context).toContain("aprovação humana");
+  });
+
+  it("injeta o RAG somente na mensagem de sistema sem mutar o histórico", () => {
+    const messages = [
+      { role: "system", content: "Instruções da plataforma" },
+      { role: "user", content: "Como tratar uma lacuna?" },
+    ];
+    const enriched = appendRkfKnowledgeContext(messages, "[KB-001]\nLacunas exigem aprovação humana.");
+
+    expect(enriched).not.toBe(messages);
+    expect(messages[0]?.content).toBe("Instruções da plataforma");
+    expect(enriched[0]?.content).toContain("[KB-001]");
+    expect(enriched[1]).toEqual(messages[1]);
   });
 });
