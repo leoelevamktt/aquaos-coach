@@ -67,8 +67,8 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-https://anymodel.org/v1}
       LLM_MODEL: ${LLM_MODEL:-ag/gemini-3.7-flash-high}
       # Base RKF privada (DOCX em /data/storage/knowledge/rkf-base.docx).
-      # true = chamadas de IA falham se a base não carregar; false = degrada sem RAG.
-      RKF_KNOWLEDGE_REQUIRED: ${RKF_KNOWLEDGE_REQUIRED:-false}
+      # Em produção ela é obrigatória: se não carregar, a IA não responde sem metodologia.
+      RKF_KNOWLEDGE_REQUIRED: ${RKF_KNOWLEDGE_REQUIRED:-true}
       # Provisionamento de contas de produção (senhas nunca no código)
       AUTH_COACH_EMAIL: ${AUTH_COACH_EMAIL:-treinador@elevamkt.digital}
       AUTH_COACH_PASSWORD: ${AUTH_COACH_PASSWORD:-}
