@@ -1,6 +1,11 @@
 import { registerAiRoutes as registerCoreAiRoutes } from "./ai-routes-core.js";
 import { getSession, roleAllows, sessionToken } from "./auth.js";
 import { buildRkfKnowledgeContext } from "./rkf-knowledge-injection.js";
+import {
+  configureRkfCatalogLlmInjection,
+  enterRkfAiOrganization,
+  installRkfCatalogLlmInjection,
+} from "./rkf-catalog-llm-injection.js";
 
 export {
   VISION_COACH_PROMPT,
@@ -13,6 +18,29 @@ export type { VisionAnalysisRecord } from "./ai-routes-core.js";
 
 export function registerAiRoutes(...args: Parameters<typeof registerCoreAiRoutes>) {
   const [app, , catalogStore] = args;
+
+  // Toda chamada OpenAI-compatible da área de IA herda a organização autenticada.
+  // O chat principal já injeta o catálogo no core; a camada final evita duplicação
+  // e cobre também relatório/observação de vídeo e futuras rotas de IA.
+  configureRkfCatalogLlmInjection(catalogStore);
+  installRkfCatalogLlmInjection();
+  app.addHook("preHandler", async (request) => {
+    if (!request.url.split("?")[0]?.startsWith("/api/v1/ai/")) return;
+    const user = await getSession(sessionToken(request));
+    if (user) enterRkfAiOrganization(user.organizationId);
+  });
+
+  // Em produção a Base RKF é requisito, não fallback silencioso: falhar no
+  // startup é mais seguro que servir recomendações sem a documentação privada.
+  if (/^(1|true|yes)$/i.test(process.env.RKF_KNOWLEDGE_REQUIRED ?? "")) {
+    app.addHook("onReady", async () => {
+      const context = await buildRkfKnowledgeContext("regras futuro agente Método RKF zonas canônicas governança aprovação humana");
+      if (!context.includes("BASE DE CONHECIMENTO RKF V1.0") || context.length <= 300) {
+        throw new Error("Base RKF privada obrigatória não foi carregada corretamente");
+      }
+    });
+  }
+
   registerCoreAiRoutes(...args);
 
   app.get("/api/v1/ai/knowledge-status", async (request, reply) => {
@@ -42,7 +70,8 @@ export function registerAiRoutes(...args: Parameters<typeof registerCoreAiRoutes
         ? { loaded: true, version: catalog!.version, packageHash: catalog!.packageHash }
         : { loaded: false, reason: "Catálogo Mestre RKF ainda não importado para esta organização" },
       policy: {
-        usesBothInChat: true,
+        usesBothInPlatformAi: true,
+        preventsCatalogDuplication: true,
         preservesCertaintyMarkers: true,
         humanApprovalForCriticalDecisions: true,
       },
