@@ -13,9 +13,12 @@ dist/
 CREDENTIALS.md
 AWS-CREDENTIALS.md
 credentials*.md
+secrets/
 
 # Dados locais da API (estado mutável) — uploads de vídeo de exemplo são versionados
 apps/api/storage/aquaos-data.json
+# Base privada RKF: pode conter dados pessoais, contratuais ou metodológicos.
+apps/api/storage/knowledge/
 
 # Sistema
 .DS_Store
