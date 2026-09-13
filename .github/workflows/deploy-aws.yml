@@ -1,0 +1,122 @@
+name: Deploy AWS Production
+
+on:
+  workflow_run:
+    workflows: ["Platform CI"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aquaos-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy validated master to EC2
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEPLOY_HOST: 52.205.254.235
+      DEPLOY_USER: ubuntu
+      DEPLOY_PATH: /opt/natacao
+      PUBLIC_URL: https://natacao.elevamkt.digital
+    steps:
+      - name: Require SSH deployment key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "DEPLOY_SSH_KEY is not configured in GitHub Actions secrets." >&2
+            exit 1
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/rkf-validation.pem
+          chmod 600 ~/.ssh/rkf-validation.pem
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync master, rebuild and restart
+        run: |
+          ssh -i ~/.ssh/rkf-validation.pem "$DEPLOY_USER@$DEPLOY_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/natacao
+
+          git fetch --prune origin master
+          git checkout master
+          git reset --hard origin/master
+
+          test -s .env || { echo "Production .env is missing" >&2; exit 1; }
+          docker compose -f docker-compose.aws.yml config >/dev/null
+
+          # Build serially on the t3.small to reduce peak memory pressure.
+          export COMPOSE_PARALLEL_LIMIT=1
+          docker compose -f docker-compose.aws.yml build api web caddy
+
+          # The RKF document is private and must already exist in the persistent volume.
+          docker compose -f docker-compose.aws.yml run --rm --no-deps --entrypoint sh api -c \
+            'test -s /data/storage/knowledge/rkf-base.docx || { echo "Missing /data/storage/knowledge/rkf-base.docx" >&2; exit 1; }'
+
+          docker compose -f docker-compose.aws.yml up -d --remove-orphans
+
+          # Wait for API readiness behind the local container network/Caddy startup.
+          for attempt in $(seq 1 30); do
+            if curl -fsS --max-time 5 http://127.0.0.1:4000/api/v1/health >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker compose -f docker-compose.aws.yml ps
+              docker compose -f docker-compose.aws.yml logs --tail=120 api
+              exit 1
+            fi
+            sleep 2
+          done
+
+          # Authenticated runtime validation using credentials already present in the server .env.
+          # No password is printed or sent back to GitHub logs.
+          docker compose -f docker-compose.aws.yml exec -T api node --input-type=module <<'NODE'
+          const base = 'http://127.0.0.1:4000';
+          const email = process.env.AUTH_COACH_EMAIL;
+          const password = process.env.AUTH_COACH_PASSWORD;
+          if (!email || !password) throw new Error('Production coach credentials are not configured in the API environment');
+
+          const login = await fetch(`${base}/api/v1/auth/login`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          });
+          if (!login.ok) throw new Error(`Runtime login failed (${login.status})`);
+          const cookie = login.headers.get('set-cookie')?.split(';')[0];
+          if (!cookie) throw new Error('Runtime login did not return a session cookie');
+
+          const knowledgeResponse = await fetch(`${base}/api/v1/ai/knowledge-status`, { headers: { cookie } });
+          if (!knowledgeResponse.ok) throw new Error(`Knowledge status failed (${knowledgeResponse.status})`);
+          const knowledge = await knowledgeResponse.json();
+          if (knowledge.combinedReady !== true) throw new Error(`RKF combined context is not ready: ${JSON.stringify(knowledge)}`);
+
+          const aiResponse = await fetch(`${base}/api/v1/ai/status`, { headers: { cookie } });
+          if (!aiResponse.ok) throw new Error(`AI status failed (${aiResponse.status})`);
+          const ai = await aiResponse.json();
+          if (ai.available !== true) throw new Error(`Configured LLM is unavailable: ${ai.reason ?? 'unknown reason'}`);
+
+          console.log(`runtime validation ok · knowledge+catalog=${knowledge.combinedReady} · ai=${ai.available}`);
+          NODE
+          REMOTE
+
+      - name: Validate public production endpoints
+        run: |
+          set -euo pipefail
+          body="$(curl --fail --silent --show-error --max-time 30 "$PUBLIC_URL/api/v1/health")"
+          HEALTH_BODY="$body" node -e 'const h=JSON.parse(process.env.HEALTH_BODY); if(h.ok!==true || h.mode!=="production") process.exit(1); console.log(`public api ok · mode=${h.mode}`)'
+          curl --fail --silent --show-error --max-time 30 --output /dev/null "$PUBLIC_URL/"
+          curl --fail --silent --show-error --max-time 30 --output /dev/null "$PUBLIC_URL/manifest.webmanifest"
+
+      - name: Remove SSH key from runner
+        if: always()
+        run: rm -f ~/.ssh/rkf-validation.pem
