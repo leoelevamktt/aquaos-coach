@@ -141,12 +141,20 @@ jobs:
           const knowledge = await knowledgeResponse.json();
           if (knowledge.combinedReady !== true) throw new Error(`RKF combined context is not ready: ${JSON.stringify(knowledge)}`);
 
+          const brainResponse = await fetch(`${base}/api/v1/ai/coach-brain/status`, { headers: { cookie } });
+          if (!brainResponse.ok) throw new Error(`Coach brain status failed (${brainResponse.status})`);
+          const brain = await brainResponse.json();
+          if (brain.ready !== true) throw new Error(`RKF coach brain is not ready: ${JSON.stringify(brain)}`);
+          if (brain.safeguards?.coachApprovalRequired !== true || brain.safeguards?.hardRulesBeforeAi !== true) {
+            throw new Error('RKF coach brain safeguards are not active');
+          }
+
           const aiResponse = await fetch(`${base}/api/v1/ai/status`, { headers: { cookie } });
           if (!aiResponse.ok) throw new Error(`AI status failed (${aiResponse.status})`);
           const ai = await aiResponse.json();
           if (ai.available !== true) throw new Error(`Configured LLM is unavailable: ${ai.reason ?? 'unknown reason'}`);
 
-          console.log(`runtime validation ok · knowledge+catalog=${knowledge.combinedReady} · ai=${ai.available}`);
+          console.log(`runtime validation ok · knowledge+catalog=${knowledge.combinedReady} · coachBrain=${brain.ready} · ai=${ai.available}`);
           NODE
           REMOTE
 
