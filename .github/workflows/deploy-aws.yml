@@ -16,11 +16,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy validated master to EC2
-    if: >-
-      ${{
-        github.event_name == 'workflow_dispatch' ||
-        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master')
-      }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -44,7 +40,7 @@ jobs:
 
       - name: Sync master, rebuild and restart
         run: |
-          ssh -i ~/.ssh/rkf-validation.pem "$DEPLOY_USER@$DEPLOY_HOST" 'bash -se' <<'REMOTE'
+          ssh -o ConnectTimeout=15 -i ~/.ssh/rkf-validation.pem "$DEPLOY_USER@$DEPLOY_HOST" 'bash -se' <<'REMOTE'
           set -euo pipefail
           cd /opt/natacao
 
@@ -57,7 +53,7 @@ jobs:
 
           # Build serially on the t3.small to reduce peak memory pressure.
           export COMPOSE_PARALLEL_LIMIT=1
-          docker compose -f docker-compose.aws.yml build api web caddy
+          docker compose -f docker-compose.aws.yml build api web
 
           # The RKF document is private and must already exist in the persistent volume.
           docker compose -f docker-compose.aws.yml run --rm --no-deps --entrypoint sh api -c \
@@ -65,9 +61,10 @@ jobs:
 
           docker compose -f docker-compose.aws.yml up -d --remove-orphans
 
-          # Wait for API readiness behind the local container network/Caddy startup.
+          # A API não publica a porta 4000 no host; valide de dentro do próprio container.
           for attempt in $(seq 1 30); do
-            if curl -fsS --max-time 5 http://127.0.0.1:4000/api/v1/health >/dev/null 2>&1; then
+            if docker compose -f docker-compose.aws.yml exec -T api node -e \
+              "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"; then
               break
             fi
             if [ "$attempt" -eq 30 ]; then
