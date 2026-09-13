@@ -59,7 +59,8 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:?defina em .env}
       STORAGE_PATH: /data/storage
       BACKUP_PATH: /data/storage/backups
-      # Serviço interno opcional; a API usa AquaMotion caso esteja indisponível.
+      # AquaVision Elite é parte do runtime de produção. AquaMotion permanece
+      # somente como fallback de segurança se uma análise específica falhar.
       VISION_URL: http://vision:8800
       APP_BASE_URL: ${APP_BASE_URL:-https://natacao.elevamkt.digital}
       # Assistente IA (gateway substituível; vazio = assistente desativado)
@@ -75,7 +76,7 @@ services:
       AUTH_ATHLETE_EMAIL: ${AUTH_ATHLETE_EMAIL:-atleta@elevamkt.digital}
       AUTH_ATHLETE_PASSWORD: ${AUTH_ATHLETE_PASSWORD:-}
     # Resolvers upstream explícitos para nomes externos. O DNS interno do Docker
-    # continua resolvendo os nomes dos serviços (postgres, api, web).
+    # continua resolvendo os nomes dos serviços (postgres, api, web, vision).
     dns: ["1.1.1.1", "8.8.8.8"]
     expose:
       - "4000" # apenas na rede interna do compose; Caddy publica
@@ -86,7 +87,6 @@ services:
         condition: service_healthy
       vision:
         condition: service_healthy
-        required: false
     networks: [backend]
     mem_limit: 900m # FFmpeg precisa de margem; swap cobre picos
     memswap_limit: 1500m
@@ -94,12 +94,16 @@ services:
     logging: *logging
 
   vision:
-    profiles: ["vision"]
     build:
       context: .
       dockerfile: services/vision/Dockerfile
     environment:
       VISION_MEDIA_ROOT: /data/storage/uploads
+      # Balanced mantém RTMO-M + RTMPose-M; pode ser substituído por
+      # performance em host GPU/maior sem alterar o contrato da plataforma.
+      VISION_MODE: ${VISION_MODE:-balanced}
+      VISION_DEVICE: ${VISION_DEVICE:-cpu}
+      VISION_REFINEMENT: ${VISION_REFINEMENT:-1}
     expose:
       - "8800"
     volumes:
@@ -107,11 +111,11 @@ services:
       - natacao_api_storage:/data/storage
       - natacao_vision_models:/models
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8800/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import json,urllib.request; d=json.load(urllib.request.urlopen('http://localhost:8800/health', timeout=3)); assert d.get('status') == 'ok'; assert d.get('engine') == 'AquaVision Elite 2.0'"]
       interval: 10s
       timeout: 5s
-      retries: 18
-      start_period: 30s
+      retries: 24
+      start_period: 45s
     mem_limit: 3g
     memswap_limit: 4g
     restart: unless-stopped
