@@ -61,7 +61,10 @@ def test_analyze_returns_elite_contract(tmp_path):
         response = client.post("/analyze", json={"path": "treino.mp4", "targetFps": 10, "strokeStyle": "livre", "poolLengthM": 50})
         assert response.status_code == 200
         payload = response.json()
-        assert payload["engine"] == "AquaVision Elite"
+        # Mantém a família AquaVision para compatibilidade de overlays/clientes,
+        # enquanto a edição/versionamento deixam explícito o motor Elite.
+        assert payload["engine"] == "AquaVision"
+        assert payload["engineEdition"] == "AquaVision Elite"
         assert payload["engineVersion"] == "2.0"
         assert payload["metadata"]["persons"] == 1
         assert payload["metadata"]["strokeStyle"] == "livre"
