@@ -146,7 +146,7 @@ async function loadKnowledgeChunks(): Promise<RkfKnowledgeChunk[] | undefined> {
   const target = knowledgePath();
   try {
     const info = await stat(target);
-    if (cache?.path === target && cache.mtimeMs === info.mtimeMs) return cache.chunks;
+    if (cache && cache.path === target && cache.mtimeMs === info.mtimeMs) return cache.chunks;
     const buffer = await readFile(target);
     const extraction = await extractDocument(buffer, target);
     if (extraction.status !== "extracted" || !extraction.text?.trim()) {
