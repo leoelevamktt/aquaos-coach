@@ -20,27 +20,71 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      DEPLOY_HOST: 52.205.254.235
-      DEPLOY_USER: ubuntu
       DEPLOY_PATH: /opt/natacao
       PUBLIC_URL: https://natacao.elevamkt.digital
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_INSTANCE_ID: ${{ secrets.AWS_INSTANCE_ID }}
+      AWS_INSTANCE_AZ: ${{ secrets.AWS_INSTANCE_AZ }}
+      AWS_INSTANCE_USER: ${{ secrets.AWS_INSTANCE_USER }}
+      AWS_INSTANCE_HOST: ${{ secrets.AWS_INSTANCE_HOST }}
     steps:
-      - name: Require SSH deployment key
-        env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Validate EC2 target
         run: |
-          if [ -z "$DEPLOY_SSH_KEY" ]; then
-            echo "DEPLOY_SSH_KEY is not configured in GitHub Actions secrets." >&2
+          set -euo pipefail
+          for name in AWS_REGION AWS_INSTANCE_ID AWS_INSTANCE_AZ AWS_INSTANCE_USER AWS_INSTANCE_HOST; do
+            if [ -z "${!name:-}" ]; then
+              echo "$name is not configured in GitHub Actions secrets." >&2
+              exit 1
+            fi
+          done
+
+          state="$(aws ec2 describe-instances \
+            --instance-ids "$AWS_INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].State.Name' \
+            --output text)"
+          if [ "$state" != "running" ]; then
+            echo "EC2 target is not running (state=$state)." >&2
             exit 1
           fi
+
+          current_host="$(aws ec2 describe-instances \
+            --instance-ids "$AWS_INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' \
+            --output text)"
+          if [ -n "$current_host" ] && [ "$current_host" != "None" ] && [ "$current_host" != "$AWS_INSTANCE_HOST" ]; then
+            echo "Configured host does not match the EC2 public address." >&2
+            exit 1
+          fi
+
+      - name: Authorize ephemeral SSH key with EC2 Instance Connect
+        run: |
+          set -euo pipefail
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/rkf-validation.pem
-          chmod 600 ~/.ssh/rkf-validation.pem
-          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/aquaos-deploy
+          chmod 600 ~/.ssh/aquaos-deploy
+
+          aws ec2-instance-connect send-ssh-public-key \
+            --region "$AWS_REGION" \
+            --availability-zone "$AWS_INSTANCE_AZ" \
+            --instance-id "$AWS_INSTANCE_ID" \
+            --instance-os-user "$AWS_INSTANCE_USER" \
+            --ssh-public-key "file://$HOME/.ssh/aquaos-deploy.pub" \
+            --query Success \
+            --output text | grep -qx True
+
+          # EC2 Instance Connect keys are short-lived, so establish trust and connect immediately.
+          ssh-keyscan -T 10 -H "$AWS_INSTANCE_HOST" >> ~/.ssh/known_hosts
 
       - name: Sync master, rebuild and restart
         run: |
-          ssh -o ConnectTimeout=15 -i ~/.ssh/rkf-validation.pem "$DEPLOY_USER@$DEPLOY_HOST" 'bash -se' <<'REMOTE'
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/aquaos-deploy "$AWS_INSTANCE_USER@$AWS_INSTANCE_HOST" 'bash -se' <<'REMOTE'
           set -euo pipefail
           cd /opt/natacao
 
@@ -61,7 +105,7 @@ jobs:
 
           docker compose -f docker-compose.aws.yml up -d --remove-orphans
 
-          # A API não publica a porta 4000 no host; valide de dentro do próprio container.
+          # The API does not publish port 4000 on the host; validate from inside the container.
           for attempt in $(seq 1 30); do
             if docker compose -f docker-compose.aws.yml exec -T api node -e \
               "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"; then
@@ -114,6 +158,6 @@ jobs:
           curl --fail --silent --show-error --max-time 30 --output /dev/null "$PUBLIC_URL/"
           curl --fail --silent --show-error --max-time 30 --output /dev/null "$PUBLIC_URL/manifest.webmanifest"
 
-      - name: Remove SSH key from runner
+      - name: Remove ephemeral SSH key from runner
         if: always()
-        run: rm -f ~/.ssh/rkf-validation.pem
+        run: rm -f ~/.ssh/aquaos-deploy ~/.ssh/aquaos-deploy.pub
