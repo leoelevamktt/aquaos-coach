@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getSession, roleAllows, sessionToken } from "./auth.js";
 import type { ManagedRecord, ManagedStore, ResourceKind, StoreEvent } from "./managed-store.js";
 
-const ENGINE_VERSION = "rkf-coach-automation-1.0.0";
+const ENGINE_VERSION = "rkf-coach-automation-1.0.1";
 const WATCHED_RESOURCES = new Set<ResourceKind>(["athletes", "activities", "results", "loadSnapshots", "readinessScores", "athleteResponses", "workouts", "prescriptions", "sessionExecutions", "evolutionAssessments"]);
 const activeRuns = new Set<string>();
 
@@ -110,16 +110,28 @@ export function recomputeCoachAutomation(store: ManagedStore, organizationId: st
     for (const candidate of candidates) {
       const signature = fingerprint(candidate);
       const athleteDecisions = store.list("adaptationDecisions").filter((item) => item.organizationId === organizationId && item.automation === true && item.athleteId === candidate.athleteId);
-      const latest = athleteDecisions[0];
       const current = athleteDecisions.find((item) => item.status === "PROPOSED");
-      const previous = athleteDecisions[1];
-      const duplicateOfResolved = latest?.status === "PROPOSED" && latest.signature === signature && previous?.signature === signature && ["APPROVED", "DISMISSED"].includes(String(previous.status));
-      if (duplicateOfResolved) {
-        store.update("adaptationDecisions", latest.id, { status: "SUPERSEDED", supersededAt: new Date().toISOString(), supersededReason: "DUPLICATE_AFTER_RESOLUTION", supersededByDecisionId: previous.id });
-      } else if (latest?.signature !== signature) {
-        if (current) store.update("adaptationDecisions", current.id, { status: "SUPERSEDED", supersededAt: new Date().toISOString(), supersededBySignature: signature });
+      const matchingResolved = athleteDecisions.find((item) => item.signature === signature && ["APPROVED", "DISMISSED"].includes(String(item.status)));
+      const duplicateProposals = athleteDecisions.filter((item) => item.status === "PROPOSED" && item.signature === signature);
+
+      // A mesma decisão já resolvida pelo coach não volta silenciosamente para a fila.
+      // Não dependemos da ordem de store.list(), que pode variar após persistência/reload.
+      if (matchingResolved && duplicateProposals.length) {
+        for (const duplicate of duplicateProposals) {
+          store.update("adaptationDecisions", duplicate.id, {
+            status: "SUPERSEDED",
+            supersededAt: new Date().toISOString(),
+            supersededReason: "DUPLICATE_AFTER_RESOLUTION",
+            supersededByDecisionId: matchingResolved.id,
+          });
+        }
+      } else if (!matchingResolved && current?.signature !== signature) {
+        if (current) {
+          store.update("adaptationDecisions", current.id, { status: "SUPERSEDED", supersededAt: new Date().toISOString(), supersededBySignature: signature });
+        }
         store.create("adaptationDecisions", { ...candidate, title: candidate.title, status: "PROPOSED", automation: true, engineVersion: ENGINE_VERSION, signature, cause, organizationId, generatedAt: new Date().toISOString() });
       }
+
       const athlete = store.get("athletes", candidate.athleteId);
       const state = candidate.priority === "CRITICAL" ? "RISK" : candidate.priority === "HIGH" ? "ATTENTION" : candidate.priority === "OPPORTUNITY" ? "PROGRESS" : "STABLE";
       if (athlete && (athlete.automationState !== state || athlete.recommendedLoadFactor !== candidate.loadFactor || athlete.nextBestAction !== candidate.title)) {
