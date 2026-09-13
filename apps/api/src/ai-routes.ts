@@ -6,6 +6,12 @@ import {
   enterRkfAiOrganization,
   installRkfCatalogLlmInjection,
 } from "./rkf-catalog-llm-injection.js";
+import {
+  configureCoachBrainLlmInjection,
+  enterCoachBrainOrganization,
+  installCoachBrainLlmInjection,
+} from "./coach-brain-llm-injection.js";
+import { registerCoachBrainRoutes } from "./coach-brain.js";
 
 export {
   VISION_COACH_PROMPT,
@@ -17,17 +23,23 @@ export {
 export type { VisionAnalysisRecord } from "./ai-routes-core.js";
 
 export function registerAiRoutes(...args: Parameters<typeof registerCoreAiRoutes>) {
-  const [app, , catalogStore] = args;
+  const [app, managedStore, catalogStore] = args;
 
   // Toda chamada OpenAI-compatible da área de IA herda a organização autenticada.
-  // O chat principal já injeta o catálogo no core; a camada final evita duplicação
-  // e cobre também relatório/observação de vídeo e futuras rotas de IA.
+  // O Catálogo Mestre e o Cérebro RKF são camadas independentes: catálogo traz
+  // conhecimento técnico; cérebro traz metodologia, histórico de decisões e
+  // contexto longitudinal do atleta. Ambas preservam isolamento por tenant.
   configureRkfCatalogLlmInjection(catalogStore);
   installRkfCatalogLlmInjection();
+  configureCoachBrainLlmInjection(managedStore);
+  installCoachBrainLlmInjection();
   app.addHook("preHandler", async (request) => {
     if (!request.url.split("?")[0]?.startsWith("/api/v1/ai/")) return;
     const user = await getSession(sessionToken(request));
-    if (user) enterRkfAiOrganization(user.organizationId);
+    if (user) {
+      enterRkfAiOrganization(user.organizationId);
+      enterCoachBrainOrganization(user.organizationId);
+    }
   });
 
   // Em produção a Base RKF é requisito, não fallback silencioso: falhar no
@@ -42,6 +54,7 @@ export function registerAiRoutes(...args: Parameters<typeof registerCoreAiRoutes
   }
 
   registerCoreAiRoutes(...args);
+  registerCoachBrainRoutes(app, managedStore, catalogStore);
 
   app.get("/api/v1/ai/knowledge-status", async (request, reply) => {
     const user = await getSession(sessionToken(request));
@@ -71,6 +84,9 @@ export function registerAiRoutes(...args: Parameters<typeof registerCoreAiRoutes
         : { loaded: false, reason: "Catálogo Mestre RKF ainda não importado para esta organização" },
       policy: {
         usesBothInPlatformAi: true,
+        coachBrainAcrossPlatformAi: true,
+        athleteLongitudinalContext: true,
+        personalizedPlanningUsesHardRulesBeforeLlm: true,
         preventsCatalogDuplication: true,
         preservesCertaintyMarkers: true,
         humanApprovalForCriticalDecisions: true,
