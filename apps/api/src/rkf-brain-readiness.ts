@@ -6,7 +6,7 @@ import type { FastifyInstance } from "fastify";
 import { getSession, roleAllows, sessionToken } from "./auth.js";
 import type { ManagedStore } from "./managed-store.js";
 import {
-  RKF_BRAIN_CONSTITUTION_RULES,
+  RKF_CONSTITUTION_RULES,
   RKF_BRAIN_CONSTITUTION_VERSION,
   RKF_BRAIN_SOURCES,
 } from "./rkf-brain-contracts.js";
@@ -70,7 +70,7 @@ export function registerRkfBrainReadinessRoute(app: FastifyInstance, store: Mana
       && library.stats.blocks === 6226
       && library.stats.volumeMismatched === 0,
     );
-    const constitutionReady = RKF_BRAIN_CONSTITUTION_RULES.length >= 25;
+    const constitutionReady = RKF_CONSTITUTION_RULES.length >= 25;
 
     const decisionMemory = {
       athletes: count(store, "athletes", organizationId),
@@ -108,7 +108,7 @@ export function registerRkfBrainReadinessRoute(app: FastifyInstance, store: Mana
       status: ready ? "FULLY_OPERATIONAL" : "PARTIAL",
       constitution: {
         version: RKF_BRAIN_CONSTITUTION_VERSION,
-        rules: RKF_BRAIN_CONSTITUTION_RULES.length,
+        rules: RKF_CONSTITUTION_RULES.length,
         alwaysInjectedBeforeLlm: true,
       },
       sources,
