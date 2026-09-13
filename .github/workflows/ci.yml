@@ -1,0 +1,75 @@
+name: Platform CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node-platform:
+    name: Node typecheck, tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit and integration tests
+        run: npm test
+      - name: Production build
+        env:
+          NEXT_PUBLIC_API_URL: https://example.invalid
+        run: npm run build
+
+  vision-tests:
+    name: AquaVision tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/vision
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            services/vision/requirements.txt
+            services/vision/requirements-dev.txt
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run tests
+        run: pytest -q
+
+  aws-compose:
+    name: AWS compose contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate resolved topology
+        env:
+          POSTGRES_PASSWORD: ci-placeholder-not-a-secret
+          CORS_ORIGINS: https://example.invalid
+          PUBLIC_API_URL: https://example.invalid
+          APP_DOMAIN: example.invalid
+        run: docker compose -f docker-compose.aws.yml config --format json | node scripts/check-aws-compose.mjs
