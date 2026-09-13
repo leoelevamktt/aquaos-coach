@@ -1,4 +1,4 @@
-/** Cliente do microservice de visão AquaVision (pose RTMO + tracking BYTE). */
+/** Cliente do microservice AquaVision Elite (pose, tracking e biomecânica). */
 
 const DEFAULT_TIMEOUT_MS = 900_000;
 
@@ -13,7 +13,32 @@ export type VisionCalibrationSnapshot = {
   points: Array<{ image: [number, number]; world: [number, number] }>;
 };
 
-export type MetricAvailability = { available: boolean; reliable: boolean; reason?: string };
+export type VisionAnalysisContext = {
+  strokeStyle?: "livre" | "costas" | "peito" | "borboleta" | "medley" | "unknown";
+  cameraView?: "side" | "front" | "rear" | "overhead" | "underwater_side" | "underwater_front" | "unknown";
+  poolLengthM?: number;
+  targetFps?: number;
+};
+
+export type MetricAvailability = { available: boolean; reliable: boolean; reason?: string; confidence?: number; method?: string };
+
+export type VisionSportMetric = {
+  id: string;
+  label?: string;
+  group?: string;
+  status: "measured" | "unavailable" | "uncalibrated" | "not_validated";
+  unit: string;
+  interval: { startSeconds: number; endSeconds: number };
+  coverage: number;
+  source: string;
+  sourceVersion: string;
+  unavailableReason?: string;
+  value?: number;
+  confidence?: number;
+  confidenceKind?: string;
+  method?: string;
+  evidence?: Record<string, unknown>;
+};
 
 export type VisionAnalysis = {
   engine: string;
@@ -21,6 +46,7 @@ export type VisionAnalysis = {
   modelVersion?: string;
   methodology: string;
   analyzedAt: string;
+  modelClass?: string;
   metadata: {
     durationSeconds: number;
     width: number;
@@ -36,11 +62,18 @@ export type VisionAnalysis = {
     primaryPersonId?: number;
     sampleFps?: number;
     keyframesTruncatedAt?: number | null;
+    strokeStyle?: string;
+    cameraView?: string;
+    poolLengthM?: number;
+    analysisQuality?: Record<string, unknown>;
   };
   metrics: { detectedCycles?: number; estimatedCadence?: number; rhythmConsistency?: number; meanMotion: number; peakMotion: number };
-  sportMetrics?: { contractVersion: string; metrics: Array<{ id: string; status: "measured" | "unavailable" | "uncalibrated" | "not_validated"; unit: string; interval: { startSeconds: number; endSeconds: number }; coverage: number; source: string; sourceVersion: string; unavailableReason?: string; value?: number }> };
+  analysisQuality?: Record<string, unknown>;
+  sportMetrics?: { contractVersion: string; metrics: VisionSportMetric[]; [key: string]: unknown };
+  biomechanics?: Record<string, unknown>;
+  technicalFindings?: Array<Record<string, unknown>>;
   timeline: { time: number; motion: number }[];
-  events: { id: string; time: number; category: string; label: string; confidence: number; note?: string; personId?: number }[];
+  events: { id: string; time: number; category: string; label: string; confidence: number; confidenceKind?: string; note?: string; personId?: number }[];
   people?: Array<Record<string, unknown>>;
   keyframes?: Array<{ t: number; persons: Array<{ id: number; kpts: number[][] }> }>;
   keyframeSegments?: Array<{ from: number; to: number; count: number; keyframes: Array<{ t: number; persons: Array<{ id: number; kpts: number[][] }> }> }>;
@@ -64,19 +97,31 @@ function visionTimeoutMs() {
 }
 
 /**
- * Solicita a análise de visão computacional para o vídeo. Qualquer falha
- * (serviço offline, timeout, nenhum atleta detectado, payload inválido)
- * devolve uma causa segura para a fila registrar o fallback sem dados brutos.
+ * Solicita análise ao AquaVision. O contexto esportivo só restringe/interpreta
+ * as métricas; ele nunca substitui a evidência do vídeo. Falhas retornam causa
+ * segura para o fallback AquaMotion.
  */
-export async function analyzeWithVision(filePath: string, onStage?: VisionStage, calibrationSnapshot?: VisionCalibrationSnapshot): Promise<VisionResult> {
+export async function analyzeWithVision(
+  filePath: string,
+  onStage?: VisionStage,
+  calibrationSnapshot?: VisionCalibrationSnapshot,
+  context: VisionAnalysisContext = {},
+): Promise<VisionResult> {
   const startedAt = performance.now();
   const result = (fallbackReason: VisionFallbackReason): VisionResult => ({ kind: "fallback", fallbackReason, durationMs: Math.round(performance.now() - startedAt) });
-  onStage?.(6, "Detectando atletas e esqueleto com RTMO");
+  onStage?.(6, "AquaVision Elite · detectando atletas e pose");
   try {
     const response = await fetch(`${visionUrl()}/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: filePath, ...(calibrationSnapshot ? { calibration: calibrationSnapshot } : {}) }),
+      body: JSON.stringify({
+        path: filePath,
+        ...(calibrationSnapshot ? { calibration: calibrationSnapshot } : {}),
+        ...(context.strokeStyle ? { strokeStyle: context.strokeStyle } : {}),
+        ...(context.cameraView ? { cameraView: context.cameraView } : {}),
+        ...(context.poolLengthM ? { poolLengthM: context.poolLengthM } : {}),
+        ...(context.targetFps ? { targetFps: context.targetFps } : {}),
+      }),
       signal: AbortSignal.timeout(visionTimeoutMs()),
     });
     if (!response.ok) {
@@ -84,8 +129,8 @@ export async function analyzeWithVision(filePath: string, onStage?: VisionStage,
       return result(response.status >= 500 ? "service_unavailable" : "request_rejected");
     }
     const payload = await response.json() as Partial<VisionAnalysis>;
-    if (payload.engine !== "AquaVision" || !payload.metrics || !Array.isArray(payload.timeline) || !Array.isArray(payload.events)) return result("invalid_response");
-    onStage?.(88, "Compilando métricas por atleta");
+    if (!payload.engine?.startsWith("AquaVision") || !payload.metrics || !Array.isArray(payload.timeline) || !Array.isArray(payload.events)) return result("invalid_response");
+    onStage?.(88, "AquaVision Elite · compilando biomecânica e confiança");
     return { kind: "success", analysis: payload as VisionAnalysis, durationMs: Math.round(performance.now() - startedAt) };
   } catch (error) {
     return result(error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError") ? "request_timeout" : "network_error");
