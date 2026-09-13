@@ -116,7 +116,7 @@ describe("VideoAnalysisQueue", () => {
 
     const persisted = store.get("videoAnalysisJobs", job.id)!;
     expect(persisted).toMatchObject({ engine: "AquaMotion", engineVersion: "1.1-beta", fallbackReason: "service_unavailable" });
-    expect(persisted.visionAttempts).toEqual([expect.objectContaining({ engine: "AquaVision", outcome: "fallback", durationMs: 123, fallbackReason: "service_unavailable" })]);
+    expect(persisted.visionAttempts).toEqual([expect.objectContaining({ engine: "AquaVision Elite", outcome: "fallback", durationMs: 123, fallbackReason: "service_unavailable" })]);
     expect(JSON.stringify(persisted)).not.toContain("treino.mp4");
   });
 
@@ -125,18 +125,18 @@ describe("VideoAnalysisQueue", () => {
     const job = store.create("videoAnalysisJobs", { id: "job-vision-success", videoId: "video-vision-success", organizationId: "org-demo", status: "queued", progress: 0, stage: "Aguardando" });
     store.create("videos", { id: "video-vision-success", filename: "treino.mp4", organizationId: "org-demo" });
     analyzeWithVisionMock.mockResolvedValue({ kind: "success", durationMs: 456, analysis: {
-      engine: "AquaVision", engineVersion: "1.0", modelVersion: "RTMO balanced + RTMPose balanced", analyzedAt: "2026-09-07T00:00:00.000Z", methodology: "Pose",
+      engine: "AquaVision", engineVersion: "2.0", modelVersion: "RTMO balanced + RTMPose balanced", analyzedAt: "2026-09-07T00:00:00.000Z", methodology: "Pose + biomecânica",
       metadata: { durationSeconds: 10, width: 100, height: 100, fps: 30, sizeBytes: 100, bitrate: 80 }, metrics: { meanMotion: 20, peakMotion: 30 }, timeline: [], events: [],
     } });
 
     await (queue as any).process(job.id);
 
-    expect(store.get("videoAnalysisJobs", job.id)).toMatchObject({ engine: "AquaVision", engineVersion: "1.0", modelVersion: "RTMO balanced + RTMPose balanced", visionAttempts: [expect.objectContaining({ outcome: "success", durationMs: 456 })] });
+    expect(store.get("videoAnalysisJobs", job.id)).toMatchObject({ engine: "AquaVision", engineVersion: "2.0", modelVersion: "RTMO balanced + RTMPose balanced", visionAttempts: [expect.objectContaining({ outcome: "success", durationMs: 456 })] });
   });
 
-  it("persiste e envia um snapshot imutável da calibração", async () => {
+  it("persiste e envia snapshot imutável + contexto esportivo", async () => {
     const { store, queue } = createQueue("aquaos-calibration-");
-    const video = store.create("videos", { filename: "treino.mp4", organizationId: "org-demo" });
+    const video = store.create("videos", { filename: "treino.mp4", organizationId: "org-demo", title: "Técnica Livre" });
     const calibration = makeCalibration();
     analyzeWithVisionMock.mockResolvedValue({ kind: "fallback", fallbackReason: "service_unavailable", durationMs: 123 });
     analyzeVideoMock.mockResolvedValue(fallbackAnalysis);
@@ -146,7 +146,13 @@ describe("VideoAnalysisQueue", () => {
 
     expect(store.get("videoAnalysisJobs", job.id)?.calibrationSnapshot).toMatchObject({ version: "2026.09.1", laneIds: ["4"] });
     await vi.waitFor(() => expect(store.get("videoAnalysisJobs", job.id)?.status).toBe("completed"));
-    expect(analyzeWithVisionMock).toHaveBeenCalledWith(expect.any(String), expect.any(Function), expect.objectContaining({ laneIds: ["4"] }));
+    expect(analyzeWithVisionMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Function),
+      expect.objectContaining({ laneIds: ["4"] }),
+      expect.objectContaining({ strokeStyle: "livre", cameraView: "unknown", poolLengthM: 50 }),
+    );
     expect(store.get("videos", video.id)?.analysisCalibrationSnapshot).toMatchObject({ version: "2026.09.1", laneIds: ["4"] });
+    expect(store.get("videos", video.id)?.analysisVisionContext).toMatchObject({ strokeStyle: "livre", poolLengthM: 50 });
   });
 });
