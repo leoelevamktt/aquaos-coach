@@ -24,6 +24,10 @@ services:
       DATABASE_URL: postgres://natacao:natacao@postgres:5432/natacao
       PERSISTENCE_REQUIRED: "true"
       VISION_URL: http://vision:8800
+      # IA global da plataforma. A chave real vem do .env local e nunca do repositório.
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://anymodel.org/v1}
+      LLM_MODEL: ${LLM_MODEL:-ag/gemini-3.7-flash-high}
     ports:
       - "4000:4000"
     volumes:
