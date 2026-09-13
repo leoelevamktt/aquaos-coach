@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ManagedStore } from "./managed-store.js";
 import { buildAthleteBrainContext, buildCoachDecisionEvidence, derivePlanningInputs } from "./coach-brain.js";
 import { buildCoachBrainInjection } from "./coach-brain-llm-injection.js";
-import { RKF_BRAIN_CONSTITUTION_RULES, RKF_BRAIN_SOURCES, buildRkfConstitutionContext } from "./rkf-brain-contracts.js";
+import { RKF_CONSTITUTION_RULES, RKF_BRAIN_SOURCES, buildRkfConstitutionContext } from "./rkf-brain-contracts.js";
 
 const root = mkdtempSync(join(tmpdir(), "rkf-coach-brain-"));
 const store = new ManagedStore(join(root, "data.json"));
@@ -72,7 +72,7 @@ describe("Cérebro RKF personalizado", () => {
       "RKF_V5_1",
       "COACH_DECISION_MEMORY",
     ]));
-    expect(RKF_BRAIN_CONSTITUTION_RULES.length).toBeGreaterThanOrEqual(25);
+    expect(RKF_CONSTITUTION_RULES.length).toBeGreaterThanOrEqual(25);
     const constitution = buildRkfConstitutionContext();
     expect(constitution).toContain("XLSX é fonte editorial/contratual");
     expect(constitution).toContain("UNKNOWN/lacuna");
