@@ -3,8 +3,8 @@ import { analyzeWithVision, type VisionAnalysis, type VisionCalibrationSnapshot 
 
 const validAnalysis = {
   engine: "AquaVision",
-  engineVersion: "1.0",
-  methodology: "pose",
+  engineVersion: "2.0",
+  methodology: "pose + biomecânica",
   analyzedAt: "2026-09-03T00:00:00.000Z",
   metadata: { durationSeconds: 10, width: 1080, height: 608, fps: 59.94, sizeBytes: 1024, bitrate: 8000 },
   metrics: { detectedCycles: 10, estimatedCadence: 60, rhythmConsistency: 95, meanMotion: 40, peakMotion: 100 },
@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe("vision client", () => {
-  it("envia o caminho absoluto e devolve a análise válida", async () => {
+  it("envia o caminho absoluto e devolve a análise Elite válida", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(validAnalysis));
     vi.stubGlobal("fetch", fetchMock);
     const stages: Array<[number, string]> = [];
@@ -35,7 +35,28 @@ describe("vision client", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/analyze");
     expect(JSON.parse(String(init.body)).path).toBe("/uploads/treino.mp4");
-    expect(stages.map(([_, stage]) => stage)).toEqual(["Detectando atletas e esqueleto com RTMO", "Compilando métricas por atleta"]);
+    expect(stages.map(([_, stage]) => stage)).toEqual([
+      "AquaVision Elite · detectando atletas e pose",
+      "AquaVision Elite · compilando biomecânica e confiança",
+    ]);
+  });
+
+  it("propaga contexto esportivo para individualizar as métricas", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(validAnalysis));
+    vi.stubGlobal("fetch", fetchMock);
+    await analyzeWithVision("/uploads/treino.mp4", undefined, undefined, {
+      strokeStyle: "livre",
+      cameraView: "side",
+      poolLengthM: 50,
+      targetFps: 15,
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1].body))).toMatchObject({
+      path: "/uploads/treino.mp4",
+      strokeStyle: "livre",
+      cameraView: "side",
+      poolLengthM: 50,
+      targetFps: 15,
+    });
   });
 
   it("retorna fallback seguro quando o serviço está indisponível (503)", async () => {
