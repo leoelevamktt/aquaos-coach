@@ -96,14 +96,36 @@ jobs:
           docker compose -f docker-compose.aws.yml config >/dev/null
 
           # Build serially on the t3.small to reduce peak memory pressure.
+          # Vision is mandatory in production: never leave a stale vision image.
           export COMPOSE_PARALLEL_LIMIT=1
-          docker compose -f docker-compose.aws.yml build api web
+          docker compose -f docker-compose.aws.yml build api vision web
 
           # The RKF document is private and must already exist in the persistent volume.
           docker compose -f docker-compose.aws.yml run --rm --no-deps --entrypoint sh api -c \
             'test -s /data/storage/knowledge/rkf-base.docx || { echo "Missing /data/storage/knowledge/rkf-base.docx" >&2; exit 1; }'
 
           docker compose -f docker-compose.aws.yml up -d --remove-orphans
+
+          # AquaVision Elite must be healthy and the expected engine version must
+          # actually be loaded before the deploy is accepted.
+          for attempt in $(seq 1 36); do
+            if docker compose -f docker-compose.aws.yml exec -T vision python - <<'PY'
+          import json, urllib.request
+          response = json.load(urllib.request.urlopen('http://127.0.0.1:8800/health', timeout=5))
+          assert response.get('status') == 'ok', response
+          assert response.get('engine') == 'AquaVision Elite 2.0', response
+          print(f"vision runtime ok · engine={response.get('engine')} · model={response.get('model')} · device={response.get('device')}")
+          PY
+            then
+              break
+            fi
+            if [ "$attempt" -eq 36 ]; then
+              docker compose -f docker-compose.aws.yml ps
+              docker compose -f docker-compose.aws.yml logs --tail=160 vision
+              exit 1
+            fi
+            sleep 5
+          done
 
           # The API does not publish port 4000 on the host; validate from inside the container.
           for attempt in $(seq 1 30); do
@@ -118,6 +140,18 @@ jobs:
             fi
             sleep 2
           done
+
+          # Confirm API->Vision networking too, not only the vision container itself.
+          docker compose -f docker-compose.aws.yml exec -T api node --input-type=module <<'NODE'
+          const vision = await fetch('http://vision:8800/health').then(r => {
+            if (!r.ok) throw new Error(`Vision health failed (${r.status})`);
+            return r.json();
+          });
+          if (vision.status !== 'ok' || vision.engine !== 'AquaVision Elite 2.0') {
+            throw new Error(`Unexpected vision runtime: ${JSON.stringify(vision)}`);
+          }
+          console.log(`api→vision ok · ${vision.engine} · model=${vision.model} · device=${vision.device}`);
+          NODE
 
           # Authenticated runtime validation using credentials already present in the server .env.
           # No password is printed or sent back to GitHub logs.
