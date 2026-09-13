@@ -12,6 +12,7 @@ import {
   installCoachBrainLlmInjection,
 } from "./coach-brain-llm-injection.js";
 import { registerCoachBrainRoutes } from "./coach-brain.js";
+import { registerRkfBrainReadinessRoute } from "./rkf-brain-readiness.js";
 
 export {
   VISION_COACH_PROMPT,
@@ -27,8 +28,8 @@ export function registerAiRoutes(...args: Parameters<typeof registerCoreAiRoutes
 
   // Toda chamada OpenAI-compatible da área de IA herda a organização autenticada.
   // O Catálogo Mestre e o Cérebro RKF são camadas independentes: catálogo traz
-  // conhecimento técnico; cérebro traz metodologia, histórico de decisões e
-  // contexto longitudinal do atleta. Ambas preservam isolamento por tenant.
+  // conhecimento técnico; cérebro traz metodologia, histórico de decisões,
+  // constituição operacional e contexto longitudinal do atleta.
   configureRkfCatalogLlmInjection(catalogStore);
   installRkfCatalogLlmInjection();
   configureCoachBrainLlmInjection(managedStore);
@@ -55,6 +56,7 @@ export function registerAiRoutes(...args: Parameters<typeof registerCoreAiRoutes
 
   registerCoreAiRoutes(...args);
   registerCoachBrainRoutes(app, managedStore, catalogStore);
+  registerRkfBrainReadinessRoute(app, managedStore, catalogStore);
 
   app.get("/api/v1/ai/knowledge-status", async (request, reply) => {
     const user = await getSession(sessionToken(request));
@@ -87,6 +89,7 @@ export function registerAiRoutes(...args: Parameters<typeof registerCoreAiRoutes
         coachBrainAcrossPlatformAi: true,
         athleteLongitudinalContext: true,
         personalizedPlanningUsesHardRulesBeforeLlm: true,
+        constitutionalRulesAlwaysInjected: true,
         preventsCatalogDuplication: true,
         preservesCertaintyMarkers: true,
         humanApprovalForCriticalDecisions: true,
