@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ManagedStore, parseDelimited } from "./managed-store.js";
+import { ManagedStore, parseDelimited, resourceKinds } from "./managed-store.js";
 
 const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -27,6 +27,56 @@ describe("ManagedStore", () => {
       { name: "Ana", notes: "ritmo, técnica e virada" },
       { name: "Caio", notes: "linha 1\nlinha 2" },
     ]);
+  });
+
+  it("abastece as coleções administrativas com as sessões e blocos canônicos RKF", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "aquaos-rkf-admin-"));
+    directories.push(directory);
+    const store = new ManagedStore(join(directory, "data.json"));
+    expect(store.list("trainingSessions")).toHaveLength(0);
+    expect(store.list("sessionBlocks")).toHaveLength(0);
+
+    await store.initialize();
+
+    expect(store.list("trainingSessions")).toHaveLength(910);
+    expect(store.list("sessionBlocks")).toHaveLength(6226);
+    expect(store.list("sessionPrescriptions")).toHaveLength(910);
+    expect(store.list("prescriptionBlocks")).toHaveLength(6226);
+    expect(store.list("trainingZones")).toHaveLength(6);
+    expect(store.list("trainingReviewItems")).toHaveLength(910);
+    expect(store.list("trainingSourceAssets")).toHaveLength(10);
+    const dictionaries = [
+      ["rkfMaterials", 11], ["rkfSkills", 14], ["rkfRules", 18], ["rkfExercises", 15], ["rkfBlockSummaries", 910],
+    ] as const;
+    expect(resourceKinds).toEqual(expect.arrayContaining(dictionaries.map(([kind]) => kind)));
+    for (const [kind, total] of dictionaries) expect(store.list(kind as (typeof resourceKinds)[number])).toHaveLength(total);
+    expect(store.get("trainingSessions", "RKF-10-12-01")).toMatchObject({
+      title: "Aeróbio + progressão", distanceMeters: 3600, sourceSheet: "Treinos_10_12", status: "ready",
+    });
+    expect(store.get("sessionBlocks", "RKF-10-12-01-B01")).toMatchObject({
+      sessionId: "RKF-10-12-01", order: 1, distanceMeters: 600, blockType: "Aquecimento",
+    });
+
+    await store.initialize();
+    expect(store.list("trainingSessions")).toHaveLength(910);
+    expect(store.list("sessionBlocks")).toHaveLength(6226);
+  });
+
+  it("não mistura dados operacionais entre organizações durante a reconciliação canônica", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "aquaos-admin-tenant-"));
+    directories.push(directory);
+    const store = new ManagedStore(join(directory, "data.json"));
+    store.create("athletes", { id: "atleta-externo", name: "Dado privado", organizationId: "org-externa", readiness: 91 });
+    store.create("results", { id: "resultado-externo", athleteId: "atleta-externo", organizationId: "org-externa", sets: [{ repetitions: [{ timeSeconds: 12.3 }] }] });
+
+    await store.initialize();
+
+    expect(store.list("athleteProfiles")).toEqual([]);
+    expect(store.list("readinessScores")).toEqual([]);
+    expect(store.list("sessionResults")).toEqual([]);
+    expect(store.list("setResults")).toEqual([]);
+    expect(store.list("repetitionResults")).toEqual([]);
+    expect(store.list("splitResults")).toEqual([]);
   });
 
   it("publica eventos com o registro alterado para consumidores em tempo real", () => {

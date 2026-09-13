@@ -64,7 +64,12 @@ export function registerOperationalRoutes(app: FastifyInstance, store: ManagedSt
     validity: z.enum(["valid", "expired"]),
     points: z.array(z.object({ image: z.tuple([z.number(), z.number()]), world: z.tuple([z.number(), z.number()]) })).min(4).max(32),
   });
-  const protectedKinds = ["ingestions", "prescriptions", "results", "loadSnapshots", "adaptationDecisions", "governance", "users", "authSessions", "videoAnalysisJobs", "invitations"];
+  const protectedKinds = [
+    "ingestions", "prescriptions", "results", "loadSnapshots", "adaptationDecisions", "governance", "users", "authSessions", "videoAnalysisJobs", "invitations",
+    "trainingSessions", "sessionBlocks", "sessionPrescriptions", "prescriptionBlocks", "trainingZones", "trainingSourceAssets", "trainingReviewItems",
+    "rkfMaterials", "rkfSkills", "rkfRules", "rkfExercises", "rkfBlockSummaries", "sessionResults", "setResults", "repetitionResults", "splitResults",
+    "trainingIngestions", "trainingExtractions", "athleteSessionAssignments",
+  ];
   app.get("/api/v1/events", async (request, reply) => {
     const user = await getSession(sessionToken(request));
     if (!user) return reply.code(401).send({ error: "Autenticação necessária" });

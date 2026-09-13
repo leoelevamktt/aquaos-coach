@@ -15,6 +15,7 @@ export const resourceKinds = [
   "performanceBenchmarks", "evolutionAssessments", "distanceFatigueRules", "trainingSourceAssets",
   "trainingExtractions", "trainingReviewItems", "importedTrainingSessions", "importedTrainingBlocks",
   "athleteSessionAssignments", "loadCalculations", "videoAnalysisJobs", "trackAssignments", "invitations", "racePlans", "protocols", "staffAssessments",
+  "rkfMaterials", "rkfSkills", "rkfRules", "rkfExercises", "rkfBlockSummaries",
 ] as const;
 export type ResourceKind = typeof resourceKinds[number];
 
@@ -65,6 +66,25 @@ const now = () => new Date().toISOString();
 const identifier = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
 const analysesRoot = fileURLToPath(new URL("../storage/analyses/", import.meta.url));
+const canonicalRkfRoot = fileURLToPath(new URL("../../../data/rkf/RKF_V5_1/", import.meta.url));
+const canonicalCache = new Map<string, Record<string, unknown>[]>();
+
+function canonicalRows(name: string) {
+  const cached = canonicalCache.get(name);
+  if (cached) return cached;
+  const rows = parseDelimited(readFileSync(resolve(canonicalRkfRoot, name), "utf8"));
+  canonicalCache.set(name, rows);
+  return rows;
+}
+
+export const statusHasToken = (value: unknown, token: string) => String(value ?? "").split(/[|;,]+/).map((item) => item.trim()).includes(token);
+
+const listValue = (value: unknown) => String(value ?? "").split("|").map((item) => item.trim()).filter(Boolean);
+const numberValue = (value: unknown) => {
+  if (value === "" || value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 
 function precomputedAnalysis(videoId: string) {
   try {
@@ -156,6 +176,11 @@ function seed(): DatabaseShape {
       racePlans: records([]),
       protocols: records([]),
       staffAssessments: records([]),
+      rkfMaterials: records([]),
+      rkfSkills: records([]),
+      rkfRules: records([]),
+      rkfExercises: records([]),
+      rkfBlockSummaries: records([]),
     },
     audit: [],
   };
@@ -208,8 +233,108 @@ export class ManagedStore {
     this.persist();
   }
 
+  private reconcileCanonicalRkfAdmin() {
+    const timestamp = now();
+    let added = 0;
+    const merge = (kind: ResourceKind, records: ManagedRecord[]) => {
+      const known = new Set(this.data.resources[kind].filter((r) => r.organizationId === "org-demo").map((record) => record.id));
+      const missing = records.filter((record) => !known.has(record.id));
+      if (!missing.length) return;
+      this.data.resources[kind].push(...missing);
+      added += missing.length;
+    };
+    const base = (id: string, sourceFile: string, sourcePayload: Record<string, unknown>): ManagedRecord & { sourcePayload: Record<string, unknown> } => ({
+      id, organizationId: "org-demo", source: "Pacote canônico RKF V5.1", sourceFile, sourcePayload,
+      schemaVersion: String(sourcePayload.schema_version ?? "RKF_V5.1"), createdAt: timestamp, updatedAt: timestamp,
+    });
+    const sessions = canonicalRows("sessions.csv").map((row) => ({
+      ...base(String(row.session_id), "sessions.csv", row),
+      title: String(row.title), objective: String(row.objective), distanceMeters: numberValue(row.volume_audited_m),
+      proposedDistanceMeters: numberValue(row.volume_proposed_m), auditDifferenceMeters: numberValue(row.difference_m),
+      auditStatus: String(row.audit_status), sourceSheet: String(row.source_sheet), sourceRow: numberValue(row.source_row),
+      ageBand: String(row.age_band), periodizationCompatibility: String(row.periodization_compatibility), profile: String(row.profile),
+      sessionType: String(row.session_type), zoneIntention: String(row.zone_intention_raw), zones: listValue(row.zones),
+      styles: listValue(row.styles), materials: listValue(row.materials), skills: listValue(row.skills),
+      loadPse: numberValue(row.load_pse), blockCount: numberValue(row.block_count), machineStatus: String(row.machine_status),
+      appSelectable: String(row.app_selectable) === "YES", selectionFeatures: String(row.selection_features),
+      adaptationRules: String(row.adaptation_rules), status: statusHasToken(row.machine_status, "READY_WHOLE") && statusHasToken(row.machine_status, "BLOCKS_EXACT") && String(row.app_selectable) === "YES" ? "ready" : "review",
+    }));
+    const blocks = canonicalRows("blocks.csv").map((row) => ({
+      ...base(String(row.block_id), "blocks.csv", row),
+      sessionId: String(row.session_id), order: numberValue(row.block_order), blockType: String(row.block_type),
+      name: String(row.source_block_name || row.block_type), distanceMeters: numberValue(row.volume_m),
+      prescriptionText: String(row.prescription_text), zones: listValue(row.zones), styles: listValue(row.styles),
+      materials: listValue(row.materials), skills: listValue(row.skills), parseOrigin: String(row.parse_origin),
+      machineStatus: String(row.machine_status), sourceSheet: String(row.source_sheet), sourceRow: numberValue(row.source_row),
+      status: statusHasToken(row.machine_status, "READY") ? "ready" : "review",
+    }));
+    const prescriptionBlocks = canonicalRows("prescription_units.csv").map((row) => ({
+      ...base(String(row.set_id), "prescription_units.csv", row),
+      blockId: String(row.block_id), sessionId: String(row.session_id), order: numberValue(row.set_order),
+      repetitions: numberValue(row.reps_parsed), distanceMeters: numberValue(row.distance_parsed_m),
+      blockDistanceMeters: numberValue(row.block_volume_m), blockType: String(row.block_type),
+      prescriptionText: String(row.prescription_text), zones: listValue(row.zones), styles: listValue(row.styles),
+      materials: listValue(row.materials), skills: listValue(row.skills), atomization: String(row.atomization),
+      sourceFidelity: String(row.source_fidelity), status: statusHasToken(row.source_fidelity, "NORMALIZED_EXACT") ? "ready" : "review",
+    }));
+    const prescriptions = sessions.map((session) => ({
+      ...base(`prescription-${session.id}`, "sessions.csv", session["sourcePayload"] as Record<string, unknown>),
+      title: session.title, sessionId: session.id, totalVolumeM: session.distanceMeters, primaryZone: session.zones[0] ?? null,
+      zones: session.zones, objective: session.objective, blockCount: session.blockCount, status: session.status,
+    }));
+    const trainingZones = canonicalRows("zones.csv").map((row, index) => ({
+      ...base(String(row.zone_code), "zones.csv", row), name: String(row.zone_name), code: String(row.zone_code), order: index + 1,
+      effortDefinition: String(row.effort_definition), primarySystem: String(row.primary_system), rule: String(row.rkf_rule),
+      externalMapping: String(row.external_mapping), status: "active",
+    }));
+    const reviewItems = canonicalRows("normalization_audit.csv").map((row) => ({
+      ...base(`normalization-${row.session_id}`, "normalization_audit.csv", row), title: `Auditoria ${row.session_id}`,
+      sessionId: String(row.session_id), sourceSheet: String(row.source_sheet), distanceMeters: numberValue(row.volume_m),
+      normalizedBlocks: numberValue(row.normalized_blocks), normalizationMethod: String(row.normalization_method),
+      result: String(row.status), status: statusHasToken(row.status, "EXACT_910_READY") ? "ready" : "review",
+    }));
+    const sourceFiles = ["sessions.csv", "blocks.csv", "prescription_units.csv", "normalization_audit.csv", "block_summary.csv", "zones.csv", "materials.csv", "skills.csv", "rules_rkf.csv", "exercises.csv"];
+    const sourceAssets = sourceFiles.map((name) => {
+      const buffer = readFileSync(resolve(canonicalRkfRoot, name));
+      const rows = canonicalRows(name);
+      return { ...base(`rkf-source-${name}`, name, { columns: rows[0] ? Object.keys(rows[0]) : [] }), title: name, filename: name,
+        rows: rows.length, columns: rows[0] ? Object.keys(rows[0]) : [], sizeBytes: buffer.length,
+        sha256: createHash("sha256").update(buffer).digest("hex"), packageVersion: "RKF_V5.1", status: "ready" };
+    });
+    const materials = canonicalRows("materials.csv").map((row) => ({ ...base(String(row.material_code), "materials.csv", row),
+      name: String(row.material_name), code: String(row.material_code), category: String(row.category), primaryUse: String(row.primary_use), constraint: String(row.rkf_constraint), status: "active" }));
+    const skills = canonicalRows("skills.csv").map((row) => ({ ...base(String(row.skill_code), "skills.csv", row),
+      name: String(row.skill_name), code: String(row.skill_code), category: String(row.category), technicalSequence: String(row.technical_sequence), status: "active" }));
+    const rules = canonicalRows("rules_rkf.csv").map((row) => ({ ...base(String(row.rule_id), "rules_rkf.csv", row),
+      name: String(row.rule_group), code: String(row.rule_id), group: String(row.rule_group), description: String(row.rule_text), severity: String(row.severity), status: "active" }));
+    const exercises = canonicalRows("exercises.csv").map((row) => ({ ...base(String(row.exercise_code), "exercises.csv", row),
+      name: String(row.exercise_name), code: String(row.exercise_code), category: String(row.category), strokeScope: String(row.stroke_scope), skill: String(row.skill), definition: String(row.definition), status: "active" }));
+    const blockSummaries = canonicalRows("block_summary.csv").map((row) => ({ ...base(`summary-${row.session_id}`, "block_summary.csv", row),
+      title: `Resumo ${row.session_id}`, sessionId: String(row.session_id), sourceSheet: String(row.source_sheet),
+      auditedDistanceMeters: numberValue(row.volume_audited_m), blockCount: numberValue(row.block_count), blockDistanceMeters: numberValue(row.block_volume_sum_m),
+      differenceMeters: numberValue(row.difference_m), machineStatus: String(row.machine_status), normalizationMethod: String(row.normalization_method),
+      status: numberValue(row.difference_m) !== null && numberValue(row.difference_m) === 0 ? "ready" : "review" }));
+    merge("trainingSessions", sessions);
+    merge("sessionBlocks", blocks);
+    merge("sessionPrescriptions", prescriptions);
+    merge("prescriptionBlocks", prescriptionBlocks);
+    merge("trainingZones", trainingZones);
+    merge("trainingReviewItems", reviewItems);
+    merge("trainingSourceAssets", sourceAssets);
+    merge("rkfMaterials", materials);
+    merge("rkfSkills", skills);
+    merge("rkfRules", rules);
+    merge("rkfExercises", exercises);
+    merge("rkfBlockSummaries", blockSummaries);
+    if (added) this.data.audit.push({ id: identifier("audit"), action: "import", resource: "trainingSessions", summary: `Reconciliação RKF V5.1: ${added} registros administrativos`, createdAt: timestamp, organizationId: "org-demo" });
+    return added;
+  }
+
   async initialize(databaseUrl = process.env.DATABASE_URL) {
-    if (!databaseUrl) return this.persistenceHealth();
+    if (!databaseUrl) {
+      if (this.reconcileCanonicalRkfAdmin()) this.persist();
+      return this.persistenceHealth();
+    }
     try {
       this.postgres = new PostgresPersistence(databaseUrl);
       await this.postgres.initialize();
@@ -219,12 +344,11 @@ export class ManagedStore {
         this.data = persisted;
         for (const kind of resourceKinds) this.data.resources[kind] ??= defaults.resources[kind];
         this.data.audit ??= [];
-        // Reprojeta dados existentes para as tabelas relacionais após novas
-        // migrations, sem alterar o payload canônico nem os IDs.
-        await this.postgres.save(structuredClone(this.data));
-      } else {
-        await this.postgres.save(structuredClone(this.data));
       }
+      this.reconcileCanonicalRkfAdmin();
+      // Reprojeta dados existentes e o catálogo canônico para as tabelas
+      // relacionais após novas migrations, sem alterar IDs já persistidos.
+      await this.postgres.save(structuredClone(this.data));
       this.persistenceError = undefined;
       return this.persistenceHealth();
     } catch (error) {
@@ -233,6 +357,10 @@ export class ManagedStore {
       if (process.env.PERSISTENCE_REQUIRED === "true") throw error;
       return this.persistenceHealth();
     }
+  }
+
+  catalogPersistence(): PostgresPersistence | undefined {
+    return this.postgres;
   }
 
   persistenceHealth(): PersistenceHealth {

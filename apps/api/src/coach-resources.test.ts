@@ -27,5 +27,11 @@ describe('Novos recursos da comissão',()=>{
     expect((await app.inject({method:'DELETE',url:`/api/v1/manage/${kind}/${id}`,headers:{cookie}})).statusCode).toBe(200);
     expect(store.audit().some(r=>r.resourceId===id)).toBe(true);
   });
+  it('preserva catálogos RKF e projeções administrativas como somente leitura',async()=>{
+    for(const kind of ['trainingSessions','sessionBlocks','sessionPrescriptions','prescriptionBlocks','trainingZones','trainingSourceAssets','trainingReviewItems','rkfMaterials','rkfSkills','rkfRules','rkfExercises','rkfBlockSummaries','sessionResults','setResults','repetitionResults','splitResults','trainingIngestions','trainingExtractions','athleteSessionAssignments']) {
+      expect((await app.inject({method:'GET',url:`/api/v1/manage/${kind}`,headers:{cookie}})).statusCode).toBe(200);
+      expect((await app.inject({method:'POST',url:`/api/v1/manage/${kind}`,headers:{cookie},payload:{title:'Não deve entrar'}})).statusCode).toBe(403);
+    }
+  });
   it('valida a assinatura de áudio WAV',()=>{const wav=Buffer.alloc(44);wav.write('RIFF',0);wav.write('WAVE',8);expect(signatureMatches(wav,'.wav')).toBe(true);expect(signatureMatches(Buffer.from('arquivo falso'),'.wav')).toBe(false);});
 });

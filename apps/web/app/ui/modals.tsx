@@ -170,7 +170,7 @@ export type MotionAnalysis = {
   engine: string;
   engineVersion: string;
   methodology: string;
-  metadata: { durationSeconds: number; width: number; height: number; fps: number; sizeBytes: number; bitrate: number; units?: string; calibrated?: boolean; calibrationSnapshot?: { origin: string; version: string; cameraId: string; poolId: string; laneIds: string[]; coverage: number; validity: "valid" | "expired" }; metricAvailability?: Record<"avgSpeed" | "maxSpeed" | "distance" | "distancePerStroke", MetricAvailability>; persons?: number; primaryPersonId?: number; keyframesTruncatedAt?: number | null; capabilities?: { athletes?: boolean; strokes?: boolean; speed?: boolean; pose?: boolean } };
+  metadata: { durationSeconds: number; width: number; height: number; fps: number; sizeBytes: number; bitrate: number; units?: string; calibrated?: boolean; sampleFps?: number; calibrationSnapshot?: { origin: string; version: string; cameraId: string; poolId: string; laneIds: string[]; coverage: number; validity: "valid" | "expired" }; metricAvailability?: Record<"avgSpeed" | "maxSpeed" | "distance" | "distancePerStroke", MetricAvailability>; persons?: number; primaryPersonId?: number; keyframesTruncatedAt?: number | null; capabilities?: { athletes?: boolean; strokes?: boolean; speed?: boolean; pose?: boolean } };
   metrics: { detectedCycles?: number; estimatedCadence?: number; rhythmConsistency?: number; meanMotion: number; peakMotion: number };
   sportMetrics?: { contractVersion: string; metrics: SportMetric[] };
   timeline: { time: number; motion: number }[];

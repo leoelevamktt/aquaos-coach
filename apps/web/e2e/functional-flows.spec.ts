@@ -83,6 +83,8 @@ test.describe("fluxos do coach", () => {
     await page.getByRole("button", { name: /^Criar$/ }).click();
     await expect(page.getByRole("dialog", { name: "Criar" })).toBeVisible();
     await page.getByRole("dialog", { name: "Criar" }).getByRole("button", { name: /^Treino/ }).click();
+    await expect(page.getByRole("dialog", { name: "Criar treino" })).toBeVisible();
+    await page.getByRole("button", { name: "Abrir editor de treino" }).click();
     await expect(page.getByRole("dialog", { name: "Criar treino na agenda" })).toBeVisible();
     await assertLayout(page);
     await page.getByRole("button", { name: "Estruturar treino" }).click();
@@ -172,8 +174,9 @@ test.describe("fluxos do coach", () => {
     await expect(dialog).toContainText("Convite criado");
     const invitationUrl = await dialog.getByRole("textbox", { name: "Link do convite" }).inputValue();
     expect(invitationUrl).toContain("/pt/athlete/access?invite=");
+    const localInvitationUrl = invitationUrl.replace(/^https?:\/\/[^/]+/, BASE);
     await dialog.getByRole("button", { name: "Concluir" }).click();
-    await page.goto(invitationUrl, { waitUntil: "networkidle" });
+    await page.goto(localInvitationUrl, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "Primeiro acesso" }).click();
     await page.getByRole("textbox", { name: "E-mail de acesso (convite)" }).fill(email);
     await page.getByRole("textbox", { name: "Senha de acesso (convite)" }).fill("Convite-2026!");

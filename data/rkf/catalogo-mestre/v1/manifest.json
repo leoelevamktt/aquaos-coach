@@ -1,0 +1,535 @@
+{
+  "artifact": "catalog-v1.json.gz",
+  "version": 1,
+  "sourceFile": "data/rkf/catalogo-mestre/v1/catalogo-mestre-rkf-v1.xlsx",
+  "sourceSha256": "068bd695c8155ad9681ec96fc028d4a80e008d589cab4c6a446d28a704038844",
+  "sourceBytes": 7431255,
+  "generatedAt": "2026-09-13T02:25:48.012Z",
+  "headerRow": 5,
+  "sheetCount": 13,
+  "rows": {
+    "ATLETAS": 39,
+    "PROVAS_ATLETA": 74,
+    "DOCUMENTOS": 1364,
+    "SESSOES": 4171,
+    "SESSAO_ATLETAS": 3102,
+    "COMPONENTES": 49835,
+    "INDICE_CONSULTA": 4810,
+    "DICIONARIOS": 165,
+    "TRANSCRICAO_PERFIS": 49,
+    "REFERENCIAS_ACERVO": 13,
+    "TRANSCRICAO_TREINOS": 17478,
+    "PENDENCIAS_AUDITORIA": 222,
+    "AUDITORIA_IMPORTACAO": 11
+  },
+  "sheetSha256": {
+    "ATLETAS": "e31979d9977704e91c3123be19273eee8b72588ac4b7241432020d517c8eefad",
+    "PROVAS_ATLETA": "b85fa8ceb946360b3c457895c5d4ed6f249e9988d29a4f7ddfec81a5e1049024",
+    "DOCUMENTOS": "392a816cfdd6507c13aebec1066a911c0c6f8165243f6beca9ad49aa6a09887e",
+    "SESSOES": "e5867cfeafe5030aeb2b2c5e51a11b75ab9c2d5999f8ba718e10eb79883ef335",
+    "SESSAO_ATLETAS": "45901492ada68188b73290ecece343f54c0305a035f58ddac2efbf8445d31c28",
+    "COMPONENTES": "e1ee34d9251289b02dd3038609e3f551dcfb8a0549dc225cafee798bcd0a44b0",
+    "INDICE_CONSULTA": "8379a3af6ab808cf13c69dd396731a6a4e19a4ef657877de76088b2c04086ed2",
+    "DICIONARIOS": "0b02c687eeb49dab41de65a0daed97717cf0587e346318dbdef534ae0268d174",
+    "TRANSCRICAO_PERFIS": "46e17636773e40765f7d3d8034bf1b9770d7b0923e987231262e34b7178a4e7b",
+    "REFERENCIAS_ACERVO": "f0cc69ba3d3e0147da6bc4b5b07d0b15dfc19df01535add86f9876f1b9297948",
+    "TRANSCRICAO_TREINOS": "6c24bdac592e75e7c54e87fe6218197464b79961cdf49b0b897dcf7a861dff5c",
+    "PENDENCIAS_AUDITORIA": "a76db4bb4cb78be5e26a58c7ebd8d763611e9f0d4466dce430d37c63220623c5",
+    "AUDITORIA_IMPORTACAO": "e70cee7672dfc8e6a4c2ec90feb2f98eb33330e25ba7716662260631ec316297"
+  },
+  "packageHash": "cad6960b397e161e29b510412b2f3f4c073f92ff4fbe61206287900f348b9267",
+  "sourceCellErrors": [
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F45189",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G45189",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F45403",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G45403",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F45532",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G45532",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F45694",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G45694",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F45823",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G45823",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F46054",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G46054",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F46221",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G46221",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F46280",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G46280",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F46644",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G46644",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F46750",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G46750",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F46860",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G46860",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F46973",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G46973",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F47103",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G47103",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F47227",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G47227",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F47367",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G47367",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F47477",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G47477",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F47605",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G47605",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F47721",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G47721",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F47859",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G47859",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F47976",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G47976",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F48105",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G48105",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F48230",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G48230",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F48354",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G48354",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F48460",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G48460",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F48572",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G48572",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F48683",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G48683",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F48872",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G48872",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F48961",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G48961",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F49091",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G49091",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F49303",
+      "value": "#N/A"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G49303",
+      "value": "#N/A"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F49425",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G49425",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F49485",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G49485",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "F49709",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "COMPONENTES",
+      "cell": "G49709",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F4228",
+      "value": "#VALUE!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G4228",
+      "value": "#VALUE!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F4320",
+      "value": "#DIV/0!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G4320",
+      "value": "#DIV/0!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F7337",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G7337",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F7625",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G7625",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F14605",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G14605",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F14755",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G14755",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F15056",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G15056",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F15064",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G15064",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F15640",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G15640",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F15744",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G15744",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F15847",
+      "value": "#DIV/0!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G15847",
+      "value": "#DIV/0!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F15949",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G15949",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F16125",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G16125",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F16699",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G16699",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F16871",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G16871",
+      "value": "#REF!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "F17388",
+      "value": "#DIV/0!"
+    },
+    {
+      "sheet": "TRANSCRICAO_TREINOS",
+      "cell": "G17388",
+      "value": "#DIV/0!"
+    }
+  ],
+  "artifactSha256": "3d99c2e3f4129871b968c217e20a7bb78f8808494438bbca290cb6dbca4334d6",
+  "artifactBytes": 4748460
+}

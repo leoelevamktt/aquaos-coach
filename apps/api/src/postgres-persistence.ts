@@ -29,6 +29,10 @@ export type RkfSeedImport = {
   organizationId: string;
 };
 
+export type RkfColumnarSeedImport = Omit<RkfSeedImport, "files"> & {
+  files: Array<{ name: string; sha256: string; columns: string[]; rows: string[][] }>;
+};
+
 export type MigrationStatus = {
   applied: string[];
   pending: string[];
@@ -108,6 +112,14 @@ export class PostgresPersistence {
 
   constructor(databaseUrl: string) {
     this.pool = new Pool({ connectionString: databaseUrl, max: Number(process.env.DATABASE_POOL_SIZE ?? 8) });
+  }
+
+  async getRkfSeedImportStatus(organizationId: string, version: string, packageHash: string): Promise<{ importedAt: string } | undefined> {
+    const result = await this.pool.query<{ imported_at: string }>(
+      "SELECT imported_at FROM rkf_seed_imports WHERE organization_id = $1 AND version = $2 AND package_hash = $3",
+      [organizationId, version, packageHash],
+    );
+    return result.rows[0] ? { importedAt: result.rows[0].imported_at } : undefined;
   }
 
   async initialize() {
@@ -263,6 +275,40 @@ export class PostgresPersistence {
           SELECT $1, $2, (ordinality - 1)::integer, value
           FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY
         `, [importId, file.name, JSON.stringify(file.rows)]);
+      }
+      await client.query("COMMIT");
+      return { driver: "postgres" as const, importId, importedRows: input.files.reduce((sum, file) => sum + file.rows.length, 0), files: input.files.length };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async importRkfColumnarSeed(input: RkfColumnarSeedImport) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const inserted = await client.query<{ id: string }>(`
+        INSERT INTO rkf_seed_imports (id, organization_id, version, package_hash, manifest, imported_by)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        ON CONFLICT (organization_id, version, package_hash)
+        DO UPDATE SET manifest = EXCLUDED.manifest, imported_by = EXCLUDED.imported_by, imported_at = now()
+        RETURNING id
+      `, [input.id, input.organizationId, input.version, input.packageHash, JSON.stringify(input.manifest), input.importedBy]);
+      const importId = inserted.rows[0]?.id ?? input.id;
+      await client.query("DELETE FROM rkf_seed_rows WHERE import_id = $1", [importId]);
+      const batchSize = 1_000;
+      for (const file of input.files) {
+        for (let offset = 0; offset < file.rows.length; offset += batchSize) {
+          const payloads = file.rows.slice(offset, offset + batchSize).map((values) => Object.fromEntries(file.columns.map((column, index) => [column, values[index] ?? ""])));
+          await client.query(`
+            INSERT INTO rkf_seed_rows (import_id, entity_type, row_index, payload)
+            SELECT $1, $2, ($4 + ordinality - 1)::integer, value
+            FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY
+          `, [importId, file.name, JSON.stringify(payloads), offset]);
+        }
       }
       await client.query("COMMIT");
       return { driver: "postgres" as const, importId, importedRows: input.files.reduce((sum, file) => sum + file.rows.length, 0), files: input.files.length };

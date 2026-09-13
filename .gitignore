@@ -23,6 +23,8 @@ Thumbs.db
 
 # Temporários
 .tmp-*/
+tmp/
+apps/api/storage/rkf-catalog-sidecar/
 .claude/
 .dev-server.log
 .dev-server-error.log

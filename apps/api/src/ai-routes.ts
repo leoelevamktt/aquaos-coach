@@ -1,8 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import type { ManagedStore } from "./managed-store.js";
 import { getSession, roleAllows, sessionToken } from "./auth.js";
+import { buildRkfCatalogContext } from "./rkf-catalog-retrieval.js";
+import type { CatalogRow } from "./rkf-catalog-store.js";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
+type CatalogKnowledgeStore = {
+  searchAcrossSheets(organizationId: string, q: string, maxRows: number): CatalogRow[];
+  status(organizationId: string): { version: number; packageHash: string } | undefined;
+};
 
 const LLM_BASE_URL = process.env.LLM_BASE_URL ?? "https://api.elevamkt.digital/v1";
 const LLM_API_KEY = process.env.LLM_API_KEY ?? "";
@@ -368,7 +374,14 @@ async function inspectLlmAvailability() {
   }
 }
 
-export function registerAiRoutes(app: FastifyInstance, store: ManagedStore) {
+export function buildCatalogKnowledgeContext(catalogStore: CatalogKnowledgeStore, organizationId: string, question: string): string {
+  const source = catalogStore.status(organizationId);
+  if (!source) return "";
+  const rows = catalogStore.searchAcrossSheets(organizationId, question, 12);
+  return rows.length ? buildRkfCatalogContext(rows, question, source) : "";
+}
+
+export function registerAiRoutes(app: FastifyInstance, store: ManagedStore, catalogStore?: CatalogKnowledgeStore) {
   app.get("/api/v1/ai/status", async (request, reply) => {
     const user = await getSession(sessionToken(request));
     if (!roleAllows(user, ["coach", "admin"])) return reply.code(user ? 403 : 401).send({ error: user ? "Ação exclusiva da comissão técnica" : "Autenticação necessária" });
@@ -389,9 +402,12 @@ export function registerAiRoutes(app: FastifyInstance, store: ManagedStore) {
     }
 
     const context = buildPlatformContext(store, user!.organizationId);
+    const rkfCatalogContext = catalogStore
+      ? buildCatalogKnowledgeContext(catalogStore, user!.organizationId, history[history.length - 1]?.content ?? "")
+      : "";
     const language = ({ "pt-BR": "português do Brasil", en: "English", es: "español", fr: "français" } as Record<string, string>)[body?.language ?? "pt-BR"] ?? "português do Brasil";
     const messages = [
-      { role: "system", content: `${SYSTEM_PROMPT}\nIdioma escolhido pelo técnico: ${language}. Responda nesse idioma.\n\n=== SNAPSHOT DA PLATAFORMA ===\n${context}` },
+      { role: "system", content: `${SYSTEM_PROMPT}\nIdioma escolhido pelo técnico: ${language}. Responda nesse idioma.\n\n=== SNAPSHOT DA PLATAFORMA ===\n${context}${rkfCatalogContext ? `\n\n${rkfCatalogContext}` : ""}` },
       ...history.map((m) => ({ role: m.role, content: m.content })),
     ];
 

@@ -28,6 +28,30 @@ export function angleDegrees(a: Point, b: Point, c: Point) {
   const denominator = Math.hypot(a.x-b.x,a.y-b.y) * Math.hypot(c.x-b.x,c.y-b.y);
   return denominator ? Math.acos(Math.max(-1,Math.min(1,((a.x-b.x)*(c.x-b.x)+(a.y-b.y)*(c.y-b.y))/denominator))) * 180 / Math.PI : null;
 }
+const metricNumber=(value:unknown,unit:string,digits=2)=>typeof value==='number'&&Number.isFinite(value)?`${value.toLocaleString('pt-BR',{minimumFractionDigits:digits,maximumFractionDigits:digits})}${unit?` ${unit}`:''}`:'—';
+const coveragePercent=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?Math.max(0,Math.min(100,Math.round(value<=1?value*100:value))):null;
+type PersonMetricKey='strokes'|'strokeRate'|'rhythmConsistency'|'avgSpeed'|'maxSpeed'|'distance'|'distancePerStroke';
+function personMetricDisplay(analysis:MotionAnalysis,person:NonNullable<MotionAnalysis['people']>[number],key:PersonMetricKey,value:unknown,unit:string,digits=2){
+  const state=person.validity?.[key], availability=person.metricAvailability?.[key as keyof NonNullable<typeof person.metricAvailability>];
+  const calibratedMetric=['avgSpeed','maxSpeed','distance','distancePerStroke'].includes(key);
+  if(typeof value!=='number'||!Number.isFinite(value)||state==='unavailable'||state==='not_validated'||availability?.available===false)return {value:'—',note:state==='not_validated'?'Não validado':availability?.reason??'Não medido'};
+  if(calibratedMetric&&(!analysis.metadata.calibrated||state==='uncalibrated'||availability?.reliable===false))return {value:'—',note:availability?.reason??'Sem calibração'};
+  return {value:metricNumber(value,unit,digits),note:null};
+}
+const sportMetricLabels:Record<string,string>={avgSpeed:'Velocidade média',maxSpeed:'Velocidade máxima',distance:'Distância rastreada',distancePerStroke:'Distância por ciclo',strokeRate:'Frequência de ciclos'};
+const metricStatus:Record<string,string>={measured:'Medido',unavailable:'Indisponível',uncalibrated:'Sem calibração',not_validated:'Não validado'};
+function TechnicalDiagnosis({analysis,seek}:{analysis:MotionAnalysis;seek:(time:number)=>void}){
+  const people=analysis.people??[], sportMetrics=analysis.sportMetrics?.metrics??[], timeline=analysis.timeline??[];
+  const maxTime=Math.max(...timeline.map(point=>point.time),1), chartPoints=timeline.map(point=>`${point.time/maxTime*1000},${100-Math.max(0,Math.min(100,point.motion))}`).join(' ');
+  return <div className="studio-diagnosis">
+    <section className="studio-method"><header><div><span>MOTOR DE ANÁLISE</span><strong>{analysis.engine} <small>v{analysis.engineVersion}</small></strong></div><i className={analysis.metadata.calibrated?'is-ready':''}>{analysis.metadata.calibrated?'Calibrado':'Sem calibração métrica'}</i></header><p>{analysis.methodology}</p><dl><div><dt>Vídeo</dt><dd>{analysis.metadata.width}×{analysis.metadata.height} · {metricNumber(analysis.metadata.fps,'fps',2)}</dd></div><div><dt>Amostragem</dt><dd>{analysis.metadata.sampleFps?metricNumber(analysis.metadata.sampleFps,'fps',1):'Não informada'}</dd></div><div><dt>Tracks</dt><dd>{people.length||analysis.metadata.persons||0}</dd></div></dl></section>
+    <section className="studio-analysis-grid" aria-label="Resumo automático"><article><span>Ciclos de movimento</span><strong>{analysis.metrics.detectedCycles??'—'}</strong><small>{analysis.engine==='AquaMotion'?'Periodicidade global; não equivale a braçadas.':'Eventos detectados no track.'}</small></article><article><span>Cadência indicada</span><strong>{analysis.metrics.estimatedCadence?metricNumber(analysis.metrics.estimatedCadence,'ciclos/min',0):'—'}</strong><small>Use somente quando a validade do track estiver confirmada.</small></article><article><span>Consistência rítmica</span><strong>{typeof analysis.metrics.rhythmConsistency==='number'?metricNumber(analysis.metrics.rhythmConsistency,'%',0):'—'}</strong><small>Regularidade temporal na janela analisada.</small></article><article><span>Pico de movimento</span><strong>{metricNumber(analysis.metrics.peakMotion,'%',0)}</strong><small>Intensidade relativa da cena, não velocidade em água.</small></article></section>
+    {!!timeline.length&&<section className="studio-motion-chart"><header><strong>Assinatura temporal do movimento</strong><small>{timeline.length} amostras · clique nos eventos para revisar o quadro</small></header><svg viewBox="0 0 1000 100" preserveAspectRatio="none" role="img" aria-label="Movimento relativo ao longo do vídeo"><polyline points={chartPoints}/></svg><div><span>0 s</span><span>{studioTime(maxTime)}</span></div></section>}
+    {!!sportMetrics.length&&<section className="studio-sport-metrics"><h4>Métricas esportivas contratadas</h4>{sportMetrics.map(item=>{const coverage=coveragePercent(item.coverage);return <article key={`${item.id}-${item.interval.startSeconds}`}><div><strong>{sportMetricLabels[item.id]??item.label??item.id}</strong><small>{item.interval.startSeconds.toFixed(1)}–{item.interval.endSeconds.toFixed(1)} s · {coverage===null?'cobertura não informada':`${coverage}% de cobertura`}</small></div><b>{item.status==='measured'&&typeof item.value==='number'?`${metricNumber(item.value,item.unit,2)}`:metricStatus[item.status]??item.status}</b><p>{item.status==='measured'?`${item.source} · ${item.sourceVersion}`:item.unavailableReason??'Sem evidência suficiente para esta métrica.'}</p></article>})}</section>}
+    {!!people.length&&<section className="studio-tracks"><h4>Análise por track técnico</h4>{people.map(person=>{const coverage=coveragePercent(person.coverage),confidence=coveragePercent(person.meanConfidence),frequency=personMetricDisplay(analysis,person,'strokeRate',person.strokeRate,'ciclos/min',1),rhythm=personMetricDisplay(analysis,person,'rhythmConsistency',person.rhythmConsistency,'%',0),averageSpeed=personMetricDisplay(analysis,person,'avgSpeed',person.avgSpeed,'m/s',2),maximumSpeed=personMetricDisplay(analysis,person,'maxSpeed',person.maxSpeed,'m/s',2),distance=personMetricDisplay(analysis,person,'distance',person.distance,'m',1),distancePerStroke=personMetricDisplay(analysis,person,'distancePerStroke',person.distancePerStroke,'m/ciclo',2);return <article key={person.id}><header><strong>Track A#{person.id}</strong><span>{coverage===null?'— cobertura':`${coverage}% cobertura`}</span></header><dl><div><dt>Ciclos</dt><dd>{person.strokes??'—'}</dd></div><div><dt>Frequência</dt><dd>{frequency.value}</dd>{frequency.note&&<small>{frequency.note}</small>}</div><div><dt>Ritmo</dt><dd>{rhythm.value}</dd>{rhythm.note&&<small>{rhythm.note}</small>}</div><div><dt>Velocidade média</dt><dd>{averageSpeed.value}</dd>{averageSpeed.note&&<small>{averageSpeed.note}</small>}</div><div><dt>Velocidade máxima</dt><dd>{maximumSpeed.value}</dd>{maximumSpeed.note&&<small>{maximumSpeed.note}</small>}</div><div><dt>Distância</dt><dd>{distance.value}</dd>{distance.note&&<small>{distance.note}</small>}</div><div><dt>Distância por ciclo</dt><dd>{distancePerStroke.value}</dd>{distancePerStroke.note&&<small>{distancePerStroke.note}</small>}</div><div><dt>Confiança média</dt><dd>{confidence===null?'—':`${confidence}%`}</dd></div></dl><button onClick={()=>seek(person.firstSeen??0)}>Ir ao primeiro quadro · {studioTime(person.firstSeen??0)}</button></article>})}</section>}
+    {!!analysis.events.length&&<section className="studio-diagnostic-events"><h4>Evidências sincronizadas</h4>{analysis.events.map(event=><button key={event.id} onClick={()=>seek(event.time)}><span>{studioTime(event.time)}</span><strong>{event.label}</strong><small>{event.category} · {Math.round(event.confidence)}%</small></button>)}</section>}
+  </div>;
+}
 async function toWav(blob: Blob): Promise<File> {
   const context = new AudioContext();
   try {
@@ -89,23 +113,43 @@ export function VideoReview({ videoId, onClose, onSave }: { videoId: string; onC
   },[videoId,canTrack,showPose,time]);
   useEffect(()=>{if(player.current)player.current.playbackRate=rate;if(second.current)second.current.playbackRate=rate;},[rate,comparison]);
   useEffect(()=>{if(!dirty&&!recording)return;const protect=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',protect);return()=>window.removeEventListener('beforeunload',protect);},[dirty,recording]);
-  function syncComparison(at:number,resume=false){
-    const video=second.current;if(!video||!linked)return;
+  function syncComparison(at:number,resume=false):Promise<void>{
+    const video=second.current;if(!video||!linked)return Promise.resolve();
     const target=at+offset, end=Number.isFinite(video.duration)&&video.duration>0?video.duration:Infinity;
-    if(target<0||target>=end){video.pause();video.currentTime=Math.max(0,Math.min(end,target));return;}
+    if(target<0||target>=end){video.pause();video.currentTime=Math.max(0,Math.min(end,target));return Promise.resolve();}
     if(Math.abs(video.currentTime-target)>.12||resume&&video.paused)video.currentTime=target;
     video.playbackRate=rate;
-    if(resume&&video.paused)void video.play().catch(()=>setError('Não foi possível reproduzir o vídeo comparativo.'));
+    return resume&&video.paused?video.play():Promise.resolve();
+  }
+  function syncComparisonSafely(at:number,resume=false){
+    void syncComparison(at,resume).catch(()=>{pause();setError('Não foi possível reproduzir o vídeo comparativo.');});
   }
   function seek(next: number) {
     const target=Math.max(0,Math.min(duration || Infinity,next));
     if(player.current)player.current.currentTime=target;
-    syncComparison(target,!player.current?.paused);
+    syncComparisonSafely(target,!player.current?.paused);
     setTime(target);setPoints([]);
   }
   function pause(){player.current?.pause();second.current?.pause();setPlaying(false);}
   function frame(direction:number){pause();seek((player.current?.currentTime??time)+direction/fps);}
-  async function toggle(){if(playing){pause();return;}try{syncComparison(player.current?.currentTime??time);await player.current?.play();syncComparison(player.current?.currentTime??time,true);}catch{setError('Não foi possível iniciar a reprodução. Verifique o arquivo de vídeo.');}}
+  async function toggle(){
+    if(playing){pause();return;}
+    const primary=player.current;
+    if(!primary)return;
+    setError('');
+    const at=primary.currentTime??time;
+    try{
+      // Dispare ambos enquanto o gesto do usuário ainda está ativo; aguardar o
+      // principal antes do comparativo faz alguns navegadores bloquearem o segundo.
+      const primaryPlayback=primary.play();
+      const comparisonPlayback=syncComparison(at,true);
+      const [mainResult,compareResult]=await Promise.allSettled([primaryPlayback,comparisonPlayback]);
+      if(mainResult.status==='rejected')throw mainResult.reason;
+      if(compareResult.status==='rejected'){
+        pause();setError('Não foi possível reproduzir o vídeo comparativo.');
+      }
+    }catch{pause();setError('Não foi possível iniciar a reprodução. Verifique o arquivo de vídeo.');}
+  }
   function close(){if(busy||recording){setError('Conclua a gravação ou o salvamento antes de fechar.');return;}if(!dirty||window.confirm('Há alterações não salvas. Deseja sair sem salvar?'))onClose();}
   async function save(){
     if(measurement.end!==null&&measurement.end<=measurement.start){setError('O fim do trecho deve ser posterior ao início.');setTab('Medições');return;}
@@ -141,7 +185,7 @@ export function VideoReview({ videoId, onClose, onSave }: { videoId: string; onC
           <div className="studio-screen"><div className="studio-frame" style={{aspectRatio:ratio,maxWidth:`max(260px, calc((100dvh - 480px) * ${ratio}))`}}>
             <video ref={player} src={mediaUrl(record.url)} poster={mediaUrl(record.thumbnailUrl)} playsInline preload="metadata"
               onLoadedMetadata={e=>{const v=e.currentTarget;if(Number.isFinite(v.duration))setDuration(v.duration);if(v.videoWidth&&v.videoHeight)setRatio(v.videoWidth/v.videoHeight);v.playbackRate=rate;}}
-              onTimeUpdate={e=>{setTime(e.currentTarget.currentTime);syncComparison(e.currentTarget.currentTime,!e.currentTarget.paused);}}
+              onTimeUpdate={e=>{setTime(e.currentTarget.currentTime);syncComparisonSafely(e.currentTarget.currentTime,!e.currentTarget.paused);}}
               onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={pause} onError={()=>setError('O arquivo não pôde ser reproduzido. Verifique se o vídeo foi enviado em um formato compatível.')} />
             {showPose&&canTrack&&<PoseTrackingLayer videoRef={player} active serverKeyframes={keyframes} serverTrackingAvailable serverPersonIds={analysis?.people?.map(p=>p.id)??[]} coverageEndsAt={analysis?.metadata.keyframesTruncatedAt??null}/>}
             <svg viewBox="0 0 1000 1000" preserveAspectRatio="none" className={`studio-drawing ${tool==='play'?'is-passive':''}`} aria-label="Desenhar sobre o vídeo" onPointerDown={e=>{
@@ -150,7 +194,7 @@ export function VideoReview({ videoId, onClose, onSave }: { videoId: string; onC
             }}>{drawings.filter(d=>Math.abs(d.time-time)<.5).map((d,i)=><g key={i} stroke="#ffda00" fill="none" strokeWidth="4" vectorEffect="non-scaling-stroke">{d.tool==='circle'?<ellipse cx={(d.points[0].x+d.points[1].x)/2} cy={(d.points[0].y+d.points[1].y)/2} rx={Math.abs(d.points[1].x-d.points[0].x)/2} ry={Math.abs(d.points[1].y-d.points[0].y)/2}/>:<polyline points={d.points.map(p=>`${p.x},${p.y}`).join(' ')}/>} {d.tool==='angle'&&<text x={d.points[1].x+15} y={d.points[1].y-15} stroke="none" fill="#ffda00" fontSize="35">{angleDegrees(...d.points.map(p=>({x:p.x*ratio,y:p.y})) as [Point,Point,Point])?.toFixed(1)??'—'}°</text>}</g>)}{points.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r="8" fill="#ffda00"/>)}</svg>
             {!playing&&tool==='play'&&<button className="studio-big-play" aria-label="Reproduzir vídeo" onClick={()=>void toggle()}><Play size={28} fill="currentColor"/></button>}
           </div><span className="studio-screen-label">Vídeo principal</span></div>
-          {other&&<div className="studio-screen"><video ref={second} src={mediaUrl(other.url)} controls={!linked} playsInline onLoadedMetadata={e=>{e.currentTarget.playbackRate=rate;syncComparison(player.current?.currentTime??time,Boolean(playing));}} onError={()=>setError('O vídeo de comparação não pôde ser reproduzido.')}/><span className="studio-screen-label">{other.athlete??'Comparação'}</span></div>}
+          {other&&<div className="studio-screen"><video ref={second} src={mediaUrl(other.url)} aria-label="Vídeo comparativo" muted controls={!linked} playsInline onLoadedMetadata={e=>{e.currentTarget.playbackRate=rate;syncComparisonSafely(player.current?.currentTime??time,Boolean(playing));}} onError={()=>setError('O vídeo de comparação não pôde ser reproduzido.')}/><span className="studio-screen-label">{other.athlete??'Comparação'}</span></div>}
         </div>
         <div className="studio-transport"><button aria-label={playing?'Pausar':'Reproduzir'} className="studio-play" onClick={()=>void toggle()}>{playing?<Pause size={20}/>:<Play size={20}/>}</button><button aria-label="Quadro anterior" title="Quadro anterior" onClick={()=>frame(-1)}><SkipBack size={18}/></button><button aria-label="Próximo quadro" title="Próximo quadro" onClick={()=>frame(1)}><SkipForward size={18}/></button><output className="studio-time">{studioTime(time)} <span>/ {studioTime(duration)}</span></output><label className="studio-rate"><span>Velocidade</span><select aria-label="Velocidade" value={rate} onChange={e=>setRate(Number(e.target.value))}>{[.1,.25,.5,1,1.5,2].map(r=><option key={r} value={r}>{r}×</option>)}</select></label><button aria-label="Tela cheia" title="Tela cheia" onClick={()=>void (document.fullscreenElement?document.exitFullscreen():stage.current?.requestFullscreen())?.catch(()=>setError('Tela cheia indisponível neste navegador.'))}><Maximize2 size={18}/></button></div>
         <div className="studio-timeline"><input aria-label="Posição do vídeo" type="range" min={0} max={duration||1} step={.01} value={Math.min(time,duration||1)} onChange={e=>seek(Number(e.target.value))}/><div className="studio-ticks">{markers.map(m=><button key={m.id} title={`${m.label} · ${studioTime(m.time)}`} aria-label={`Ir para ${m.label} em ${studioTime(m.time)}`} style={{left:`${duration?Math.min(100,m.time/duration*100):0}%`}} onClick={()=>seek(m.time)}/>)}<span>00:00</span><span>{studioTime(duration)}</span></div></div>
@@ -160,7 +204,7 @@ export function VideoReview({ videoId, onClose, onSave }: { videoId: string; onC
         <div className="studio-markers"><span>Marcar momento</span>{categories.map(c=><button key={c} disabled={busy} onClick={()=>addMarker(c)}><Plus size={14}/>{c}</button>)}</div>
         {!!drawings.length&&<div className="studio-drawing-list">{drawings.map((d,i)=><button key={i} onClick={()=>{pause();seek(d.time);}}>Desenho {i+1}<span>{studioTime(d.time)}</span></button>)}</div>}
         {!!voice.length&&<div className="studio-voice-list">{voice.map((v,i)=><div key={i}><button onClick={()=>seek(v.time)}>Voz · {studioTime(v.time)}</button><audio controls src={mediaUrl(v.url)}/><button aria-label={`Remover comentário ${i+1}`} disabled={busy} onClick={()=>{setVoice(rows=>rows.filter((_,n)=>n!==i));change();}}><Trash2 size={16}/></button></div>)}</div>}
-      </div><aside className="studio-notebook"><div className="studio-tabs" role="tablist" aria-label="Painéis da revisão">{['Observações','Medições','Assistente'].map(t=><button key={t} role="tab" aria-selected={tab===t} onClick={()=>setTab(t)}>{t}</button>)}</div>
+      </div><aside className="studio-notebook"><div className="studio-tabs" role="tablist" aria-label="Painéis da revisão">{['Observações','Diagnóstico','Medições','Assistente'].map(t=><button key={t} role="tab" aria-selected={tab===t} onClick={()=>setTab(t)}>{t}</button>)}</div>
         <div className="studio-tab-content" role="tabpanel" aria-label={tab}>
           {tab==='Observações'&&<><div className="studio-section-heading"><h3>Notas do treinador</h3><span>{markers.length}</span></div><p className="studio-muted">Marque um momento no vídeo e descreva o ajuste técnico.</p>
             {!markers.length&&<div className="studio-empty"><CornerDownRight size={24}/><strong>A primeira observação começa no vídeo</strong><p>Use Saída, Virada ou outra categoria abaixo do player.</p></div>}
@@ -168,6 +212,7 @@ export function VideoReview({ videoId, onClose, onSave }: { videoId: string; onC
             <label className="studio-field">Síntese para o atleta<textarea value={feedback} disabled={busy} onChange={e=>{setFeedback(e.target.value);change();}} placeholder="Prioridade técnica para a próxima sessão"/></label>
             {!!automatic.length&&<details className="studio-evidence"><summary>{automatic.length} eventos do processamento automático</summary><p>Revise estes eventos antes de utilizá-los como evidência técnica. {analysis?.engine==='AquaMotion'?'O processamento disponível mede movimento global da cena.':''}</p>{automatic.map(e=><button key={e.id} onClick={()=>{pause();seek(e.time);}}><span>{studioTime(e.time)}</span><b>{e.label}</b><small>{analysis?.engine}{typeof e.confidence==='number'&&Number.isFinite(e.confidence)?` · ${e.confidence}% confiança`:''}</small></button>)}</details>}
           </>}
+          {tab==='Diagnóstico'&&(analysis?<TechnicalDiagnosis analysis={analysis} seek={seek}/>:<div className="studio-empty"><strong>Diagnóstico automático indisponível</strong><p>{pending?'O processamento ainda está em andamento.':'Reprocesse o vídeo para gerar evidências técnicas.'}</p></div>)}
           {tab==='Medições'&&<><h3>Cronometragem do trecho</h3><p className="studio-muted">Escolha os instantes e registre o que contou no vídeo.</p><div className="studio-interval"><button onClick={()=>{setMeasurement(m=>({...m,start:time}));change();}}>Definir início<strong>{studioTime(measurement.start)}</strong></button><button onClick={()=>{setMeasurement(m=>({...m,end:time}));change();}}>Definir fim<strong>{measurement.end===null?'Selecionar':studioTime(measurement.end)}</strong></button></div><p className="studio-duration">{interval>0?`${interval.toFixed(2)} s`:'Selecione um fim posterior ao início.'}</p><label className="studio-field">Ciclos completos contados<input type="number" min={0} step={1} value={measurement.cycles} onChange={e=>{setMeasurement(m=>({...m,cycles:e.target.value}));change();}}/></label><label className="studio-field">Distância percorrida (m)<input type="number" min={0} step={.01} value={measurement.distance} onChange={e=>{setMeasurement(m=>({...m,distance:e.target.value}));change();}}/></label><dl className="studio-calculations"><div><dt>Frequência no trecho</dt><dd>{manualCadence!==null&&manualCadence>=0?`${manualCadence.toFixed(1)} ciclos/min`:'Não calculada'}</dd></div><div><dt>Velocidade no trecho</dt><dd>{manualSpeed!==null?`${manualSpeed.toFixed(2)} m/s`:'Não calculada'}</dd></div></dl><p className="studio-muted">Valores derivados dos instantes, distância e contagem informados pelo treinador. Ângulos desenhados são medidas da imagem em 2D.</p><label className="studio-field">FPS de referência<input type="number" min={1} max={240} value={fps} onChange={e=>setFps(Math.max(1,Math.min(240,Number(e.target.value)||30)))}/></label><p className="studio-muted">O avanço por FPS é aproximado em arquivos com taxa variável.</p>
           {canTrack&&<><label className="studio-pose"><input type="checkbox" checked={showPose} onChange={e=>setShowPose(e.target.checked)}/>Exibir rastreamento disponível</label><TrackAssignmentPanel videoId={videoId} trackIds={analysis?.people?.map(p=>String(p.id))??[]}/></>}
           </>}

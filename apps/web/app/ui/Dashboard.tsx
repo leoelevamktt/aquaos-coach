@@ -45,7 +45,7 @@ function viewFromPath(pathname: string): AppView {
   if (pathname.includes("/seasons") || pathname.includes("/meets")) return "seasons";
   if (pathname.includes("/videos") || pathname.includes("/entries")) return "videos";
   if (pathname.includes("/analytics")) return "analytics";
-  if (pathname.includes("/rkf")) return "analytics";
+  if (pathname.includes("/rkf")) return "rkf";
   if (pathname.includes("/perfect-race")) return "race";
   if (pathname.includes("/protocols")) return "protocols";
   if (pathname.includes("/assistant")) return "ai";

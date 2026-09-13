@@ -516,7 +516,8 @@ h1, h2, h3, strong, b { font-family: var(--font-display), var(--font-ui), sans-s
 .management-main { min-width: 0; overflow-y: auto; padding: 28px; scrollbar-width: thin; }
 .management-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
 .management-toolbar > div:first-child { min-width: 190px; margin-right: auto; }
-.management-toolbar h3 { font-size: 21px; letter-spacing: -.35px; }
+.management-toolbar h3 { display: flex; align-items: center; gap: 8px; font-size: 21px; letter-spacing: -.35px; }
+.management-source-lock { padding: 4px 7px; border-radius: 999px; background: #e5f1ff; color: #315f89; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
 .management-toolbar p { color: var(--muted); font-size: 12px; margin-top: 3px; }
 .management-toolbar .local-search { width: clamp(220px, 25vw, 330px); min-width: 220px; min-height: 44px; border-radius: 10px; }
 .management-toolbar .local-search input { font-size: 13px; }
@@ -540,6 +541,10 @@ h1, h2, h3, strong, b { font-family: var(--font-display), var(--font-ui), sans-s
 .management-actions button:hover { border-color: #83bdb3; background: #f3faf8; color: var(--teal-dark); transform: translateY(-1px); }
 .management-actions button.danger:hover { border-color: #e6aaa7; color: var(--coral); background: #fff7f6; }
 .management-actions em { display: none; font-style: normal; font-weight: 700; }
+.management-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 14px 2px 0; }
+.management-pagination button { min-height: 38px; padding: 0 12px; border: 1px solid #d5e0df; border-radius: 8px; background: #fff; color: #365b63; font-size: 11px; font-weight: 700; cursor: pointer; }
+.management-pagination button:disabled { opacity: .4; cursor: default; }
+.management-pagination span { color: #708388; font-size: 11px; }
 .management-loading, .management-empty { min-height: 360px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; color: #74868b; }
 .management-loading { flex-direction: row; font-size: 13px; }
 .management-empty b { color: #415a61; font-size: 14px; }

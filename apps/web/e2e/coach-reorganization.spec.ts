@@ -55,7 +55,10 @@ test('novas áreas do treinador e edição de protocolo em desktop/mobile', asyn
 });
 
 test('abrir análise leva ao estúdio e salva desenhos, notas e comparação', async ({ page }, testInfo) => {
-  const video: Record<string, unknown> = {id:'video-test',title:'Vídeo de validação',url:'/fixture.webm'};
+  const video: Record<string, unknown> = {
+    id:'video-test', title:'Vídeo de validação', url:'/fixture.webm',
+    manualEvents: Array.from({length:18},(_,index)=>({id:`marker-${index}`,time:index/2,label:`Evidência ${index+1}`,category:'técnica',note:'Observação técnica detalhada para validar a rolagem do caderno no desktop.'})),
+  };
   await page.route('**/api/v1/**', async route => {
     const path=new URL(route.request().url()).pathname;
     if(path.endsWith('/events')) {await route.abort();return;}
@@ -88,6 +91,17 @@ test('abrir análise leva ao estúdio e salva desenhos, notas e comparação', a
   });
   await page.getByRole('button',{name:'Abrir análise'}).first().click();
   await expect(page.getByRole('dialog',{name:'Revisão de vídeo'})).toBeVisible();
+  await page.setViewportSize({width:1180,height:620});
+  const desktopLayout=await page.locator('.video-studio').evaluate((dialog)=>{
+    const panel=dialog.querySelector<HTMLElement>('.studio-tab-content')!;
+    const footer=dialog.querySelector<HTMLElement>('.studio-footer')!;
+    const dialogBox=dialog.getBoundingClientRect(), panelBox=panel.getBoundingClientRect(), footerBox=footer.getBoundingClientRect();
+    return {dialogTop:dialogBox.top,dialogBottom:dialogBox.bottom,panelBottom:panelBox.bottom,footerTop:footerBox.top,clientHeight:panel.clientHeight,scrollHeight:panel.scrollHeight};
+  });
+  expect(desktopLayout.dialogTop).toBeGreaterThanOrEqual(0);
+  expect(desktopLayout.dialogBottom).toBeLessThanOrEqual(620);
+  expect(desktopLayout.panelBottom).toBeLessThanOrEqual(desktopLayout.footerTop+1);
+  expect(desktopLayout.scrollHeight).toBeGreaterThan(desktopLayout.clientHeight);
   await expect(page.getByText('MOVIMENTO AGORA',{exact:true})).toHaveCount(0);
   const primary=page.locator('.studio-frame video');
   await expect.poll(()=>primary.evaluate((el: HTMLVideoElement)=>el.readyState)).toBeGreaterThan(1);

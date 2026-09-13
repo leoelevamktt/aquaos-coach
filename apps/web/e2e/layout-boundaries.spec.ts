@@ -19,7 +19,7 @@ async function loginCoach(page: Page) {
 
 async function assertBoundary(page: Page, width: number) {
   const result = await page.evaluate((viewportWidth) => {
-    const intentionalScroll = ".week-grid, .rkf-tabs, .video-stats, .flow-diagram, .management-nav, .message-templates > div, .pool-frame";
+    const intentionalScroll = ".week-grid, .rkf-tabs, .video-stats, .flow-diagram, .management-nav, .message-templates > div, .pool-frame, .coach-table-wrap";
     const hiddenByTransform = (element: Element) => {
       let current: Element | null = element;
       while (current && current !== document.body) {
