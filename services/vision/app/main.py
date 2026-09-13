@@ -1,8 +1,8 @@
-"""API HTTP do serviço de visão AquaVision.
+"""API HTTP do serviço de visão AquaVision Elite.
 
 Endpoint interno consumido pela API Node (`POST /analyze`) com o caminho do
-vídeo no volume compartilhado de uploads. Erros retornam códigos claros para a
-API cair no AquaMotion (fallback) sem duplicar lógica.
+vídeo no volume compartilhado de uploads. O contexto esportivo é opcional e
+nunca substitui a evidência visual; métricas indisponíveis permanecem UNKNOWN.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from .config import Settings, settings_from_env
-from .engine import AnalyzeOptions, analyze_video
+from .elite_engine import AnalyzeOptions, analyze_video
 from .errors import NoPeopleDetected, VisionUnavailable
 from .pose import PoseEngine
 
@@ -55,6 +55,9 @@ class AnalyzeRequest(BaseModel):
     targetFps: float | None = Field(None, ge=4, le=30)
     minTrackSeconds: float | None = Field(None, ge=0.5, le=60)
     refinement: bool | None = None
+    strokeStyle: str | None = Field(None, pattern="^(livre|costas|peito|borboleta|medley|unknown)$")
+    cameraView: str | None = Field(None, pattern="^(side|front|rear|overhead|underwater_side|underwater_front|unknown)$")
+    poolLengthM: float | None = Field(None, ge=20, le=100)
 
 
 class HealthResponse(BaseModel):
@@ -62,6 +65,7 @@ class HealthResponse(BaseModel):
     model: str | None
     device: str
     mode: str
+    engine: str = "AquaVision Elite 2.0"
 
 
 def resolve_media_path(path: str, media_root: Path) -> Path:
@@ -90,7 +94,7 @@ def create_app(settings: Settings | None = None, pose: object | None = None) -> 
                 pass
         yield
 
-    app = FastAPI(title="AquaVision", version="1.0", lifespan=lifespan)
+    app = FastAPI(title="AquaVision Elite", version="2.0", lifespan=lifespan)
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -140,7 +144,19 @@ def create_app(settings: Settings | None = None, pose: object | None = None) -> 
             # Inference libera o GIL; o lock asyncio serializa análises sem bloquear o loop.
             result = await loop.run_in_executor(
                 None,
-                functools.partial(analyze_video, str(video_path), model, calibration_points, options, None, refine_model, request.calibration.model_dump() if request.calibration else None),
+                functools.partial(
+                    analyze_video,
+                    str(video_path),
+                    model,
+                    calibration_points,
+                    options,
+                    None,
+                    refine_model,
+                    request.calibration.model_dump() if request.calibration else None,
+                    request.strokeStyle,
+                    request.cameraView,
+                    request.poolLengthM,
+                ),
             )
             result["modelVersion"] = model_version
             return result
