@@ -149,12 +149,29 @@ jobs:
             throw new Error('RKF coach brain safeguards are not active');
           }
 
+          const fullBrainResponse = await fetch(`${base}/api/v1/ai/brain-readiness`, { headers: { cookie } });
+          if (!fullBrainResponse.ok) throw new Error(`Full brain readiness failed (${fullBrainResponse.status})`);
+          const fullBrain = await fullBrainResponse.json();
+          if (fullBrain.ready !== true || fullBrain.status !== 'FULLY_OPERATIONAL') {
+            throw new Error(`Full RKF brain is not operational: ${JSON.stringify(fullBrain)}`);
+          }
+          const sourceLayers = fullBrain.coverage?.sourceLayers;
+          if (!sourceLayers || sourceLayers.ready !== sourceLayers.total || sourceLayers.total < 7) {
+            throw new Error(`RKF brain source coverage is incomplete: ${JSON.stringify(sourceLayers)}`);
+          }
+          if ((fullBrain.constitution?.rules ?? 0) < 25 || fullBrain.constitution?.alwaysInjectedBeforeLlm !== true) {
+            throw new Error('RKF brain constitution is incomplete or not globally injected');
+          }
+          if (fullBrain.safeguards?.planningEngineBeforeTrainingAnswer !== true || fullBrain.safeguards?.unknownInsteadOfGuessing !== true) {
+            throw new Error('RKF brain training/UNKNOWN safeguards are not active');
+          }
+
           const aiResponse = await fetch(`${base}/api/v1/ai/status`, { headers: { cookie } });
           if (!aiResponse.ok) throw new Error(`AI status failed (${aiResponse.status})`);
           const ai = await aiResponse.json();
           if (ai.available !== true) throw new Error(`Configured LLM is unavailable: ${ai.reason ?? 'unknown reason'}`);
 
-          console.log(`runtime validation ok · knowledge+catalog=${knowledge.combinedReady} · coachBrain=${brain.ready} · ai=${ai.available}`);
+          console.log(`runtime validation ok · knowledge+catalog=${knowledge.combinedReady} · coachBrain=${brain.ready} · fullBrain=${fullBrain.status} · sources=${sourceLayers.ready}/${sourceLayers.total} · ai=${ai.available}`);
           NODE
           REMOTE
 
