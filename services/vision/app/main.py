@@ -158,6 +158,10 @@ def create_app(settings: Settings | None = None, pose: object | None = None) -> 
                     request.poolLengthM,
                 ),
             )
+            # Mantém o identificador de família consumido por overlays/clientes
+            # antigos, expondo a edição Elite separadamente.
+            result["engineEdition"] = result.get("engine", "AquaVision Elite")
+            result["engine"] = "AquaVision"
             result["modelVersion"] = model_version
             return result
         except NoPeopleDetected as error:
