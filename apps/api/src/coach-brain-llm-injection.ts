@@ -7,6 +7,7 @@ import {
   COACH_BRAIN_POLICY_VERSION,
   derivePlanningInputs,
 } from "./coach-brain.js";
+import { buildRkfConstitutionContext } from "./rkf-brain-contracts.js";
 import { loadRkfLibrary } from "./rkf-library.js";
 
 type LlmMessage = { role?: string; content?: unknown };
@@ -99,6 +100,7 @@ export function buildCoachBrainInjection(store: ManagedStore, organizationId: st
   const athleteContext = athleteId ? buildAthleteBrainContext(store, organizationId, athleteId) : "";
   const decisionEvidence = buildCoachDecisionEvidence(store, organizationId, athleteId);
   const planningGrounding = athleteId ? buildPlanningGrounding(store, organizationId, athleteId, question) : "";
+  const constitution = buildRkfConstitutionContext();
   const policy = `=== CÉREBRO RKF — MEMÓRIA DECISÓRIA ===
 Versão ${COACH_BRAIN_POLICY_VERSION}.
 Raciocine conforme a metodologia RKF e o padrão de decisões humanas confirmadas, sem alegar ser o treinador.
@@ -106,15 +108,14 @@ Prioridade: segurança/restrições e HARD rules > decisão humana/rule set publ
 Nunca altere por texto livre objetivo, zona, volume ou fundamento de uma prescrição já calculada pelo Planning Engine. Planejado, executado e resposta são fatos distintos. Não invente dados ausentes. Toda recomendação crítica exige aprovação humana.
 Para treino personalizado, use estado longitudinal do atleta, readiness, carga, aderência, resultados, evolução, restrições, fase ATR, meta/prova e histórico de decisões; explique quais sinais influenciaram a sugestão.
 Quando a pergunta pedir treino para um atleta identificado, o bloco CANDIDATO NORMATIVO DO PLANNING ENGINE, se presente, é obrigatório e prevalece sobre geração livre do modelo.`;
-  return [policy, athleteContext, decisionEvidence, planningGrounding].filter(Boolean).join("\n\n");
+  return [constitution, policy, athleteContext, decisionEvidence, planningGrounding].filter(Boolean).join("\n\n");
 }
 
 /**
- * Última camada antes do provider: acrescenta memória decisória, contexto
- * longitudinal e, em pedidos de treino, a saída normativa do Planning Engine
- * a todas as chamadas /chat/completions da área /api/v1/ai/*.
- * A camada do Catálogo Mestre permanece separada e pode enriquecer a mesma
- * chamada sem duplicação de marcadores.
+ * Última camada antes do provider: acrescenta constituição RKF, memória
+ * decisória, contexto longitudinal e, em pedidos de treino, a saída normativa
+ * do Planning Engine a todas as chamadas /chat/completions da área /api/v1/ai/*.
+ * A camada do Catálogo Mestre permanece separada e enriquece a mesma chamada.
  */
 export function installCoachBrainLlmInjection() {
   if (installed) return;
