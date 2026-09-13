@@ -11,9 +11,9 @@ type CatalogKnowledgeStore = {
   status(organizationId: string): { version: number; packageHash: string } | undefined;
 };
 
-const LLM_BASE_URL = process.env.LLM_BASE_URL ?? "https://api.elevamkt.digital/v1";
+const LLM_BASE_URL = process.env.LLM_BASE_URL ?? "https://anymodel.org/v1";
 const LLM_API_KEY = process.env.LLM_API_KEY ?? "";
-const LLM_MODEL = process.env.LLM_MODEL ?? "auto/best-chat";
+const LLM_MODEL = process.env.LLM_MODEL ?? "ag/gemini-3.7-flash-high";
 let statusCache: { checkedAt: number; available: boolean; reason?: string } | undefined;
 
 function esc(value: unknown): string {
