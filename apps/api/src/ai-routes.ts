@@ -44,9 +44,30 @@ export function registerAiRoutes(...args: Parameters<typeof registerCoreAiRoutes
   configureCoachBrainLlmInjection(managedStore);
   installCoachBrainLlmInjection();
   app.addHook("preHandler", async (request) => {
-    if (!request.url.split("?")[0]?.startsWith("/api/v1/ai/")) return;
+    const path = request.url.split("?")[0] ?? "";
+    if (!path.startsWith("/api/v1/ai/")) return;
     const user = await getSession(sessionToken(request));
     if (user) {
+      // Última barreira contra snapshots legados: uma sessão de atleta nunca
+      // entra nas rotas personalizadas sem um prontuário com o MESMO athleteId.
+      // Não preenchemos nenhuma métrica esportiva aqui; campos desconhecidos
+      // continuam ausentes/UNKNOWN até confirmação do atleta ou treinador.
+      if (user.role === "athlete" && user.athleteId && path.startsWith("/api/v1/ai/athlete/")) {
+        const current = managedStore.get("athletes", user.athleteId);
+        if (!current) {
+          managedStore.create("athletes", {
+            id: user.athleteId,
+            organizationId: user.organizationId,
+            name: user.name,
+            email: user.email,
+            status: "active",
+            onboardingStatus: "profile_pending",
+            profileCompleteness: "INCOMPLETE",
+            dataQuality: "UNKNOWN_FIELDS_PRESERVED",
+            source: "authenticated-athlete-runtime-repair",
+          }, "create");
+        }
+      }
       enterRkfAiOrganization(user.organizationId);
       enterCoachBrainOrganization(user.organizationId);
     }
