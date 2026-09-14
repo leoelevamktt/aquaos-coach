@@ -9,8 +9,15 @@ export default async function AthletePage({ params }: { params: Promise<{ slug?:
   if (slug[0] === "ai-workout") return <AthleteAiWorkout />;
   if (slug[0] === "performance") return <AthletePerformance />;
 
+  if (slug[0] === "home") {
+    return <div style={{ position: "relative", width: "min(100%, 430px)", minHeight: "100dvh", margin: "0 auto" }}>
+      <AthleteApp />
+      <AthleteHomePrimaryActions />
+    </div>;
+  }
+
   return <>
     <AthleteApp />
-    {slug[0] === "home" ? <AthleteHomePrimaryActions /> : <AthleteAiWorkoutShortcut />}
+    <AthleteAiWorkoutShortcut />
   </>;
 }
