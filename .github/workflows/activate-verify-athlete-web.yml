@@ -1,0 +1,149 @@
+name: Activate and Verify Athlete Web
+
+on:
+  workflow_run:
+    workflows: ["Deploy AWS Production"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aquaos-athlete-web-activation
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    name: Force current web image and validate athlete experience
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+      PUBLIC_URL: https://natacao.elevamkt.digital
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_INSTANCE_ID: ${{ secrets.AWS_INSTANCE_ID }}
+      AWS_INSTANCE_AZ: ${{ secrets.AWS_INSTANCE_AZ }}
+      AWS_INSTANCE_USER: ${{ secrets.AWS_INSTANCE_USER }}
+      AWS_INSTANCE_HOST: ${{ secrets.AWS_INSTANCE_HOST }}
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Create ephemeral SSH access
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/aquaos-web-verify
+          chmod 600 ~/.ssh/aquaos-web-verify
+          aws ec2-instance-connect send-ssh-public-key \
+            --region "$AWS_REGION" \
+            --availability-zone "$AWS_INSTANCE_AZ" \
+            --instance-id "$AWS_INSTANCE_ID" \
+            --instance-os-user "$AWS_INSTANCE_USER" \
+            --ssh-public-key "file://$HOME/.ssh/aquaos-web-verify.pub" \
+            --query Success --output text | grep -qx True
+          ssh-keyscan -T 10 -H "$AWS_INSTANCE_HOST" >> ~/.ssh/known_hosts
+
+      - name: Activate exact GitHub revision on web container
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/aquaos-web-verify "$AWS_INSTANCE_USER@$AWS_INSTANCE_HOST" \
+            "EXPECTED_SHA='$EXPECTED_SHA' bash -se" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/natacao
+
+          git fetch --prune origin master
+          git checkout master
+          git reset --hard origin/master
+          actual_sha="$(git rev-parse HEAD)"
+          test "$actual_sha" = "$EXPECTED_SHA" || {
+            echo "Server SHA mismatch: expected=$EXPECTED_SHA actual=$actual_sha" >&2
+            exit 1
+          }
+          echo "server git sha ok · $actual_sha"
+
+          # Rebuild from the exact checked-out revision and force the running web
+          # container to use that freshly built image. This removes ambiguity from
+          # Compose deciding that an older same-tag container can stay alive.
+          export COMPOSE_PARALLEL_LIMIT=1
+          docker compose -f docker-compose.aws.yml build web
+          built_image="$(docker image inspect natacao-web:latest --format '{{.Id}}')"
+          docker compose -f docker-compose.aws.yml up -d --no-deps --force-recreate web
+
+          for attempt in $(seq 1 30); do
+            if docker compose -f docker-compose.aws.yml exec -T web node --input-type=module <<'NODE'
+          const response = await fetch('http://127.0.0.1:3000/pt/athlete/home', { cache: 'no-store' });
+          const html = await response.text();
+          if (!response.ok) throw new Error(`athlete home returned ${response.status}`);
+          for (const label of ['Criar treino com IA', 'Acompanhar resultados']) {
+            if (!html.includes(label)) throw new Error(`athlete home is missing: ${label}`);
+          }
+          console.log('athlete home internal html ok · AI workout + performance actions present');
+          NODE
+            then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker compose -f docker-compose.aws.yml logs --tail=120 web
+              exit 1
+            fi
+            sleep 2
+          done
+
+          running_container="$(docker compose -f docker-compose.aws.yml ps -q web)"
+          running_image="$(docker inspect "$running_container" --format '{{.Image}}')"
+          test "$running_image" = "$built_image" || {
+            echo "Running web image is stale: built=$built_image running=$running_image" >&2
+            exit 1
+          }
+          echo "web image identity ok · $running_image"
+
+          # Validate the athlete account against the real production API without
+          # printing credentials. These are read only from the API container env.
+          docker compose -f docker-compose.aws.yml exec -T api node --input-type=module <<'NODE'
+          const base = 'http://127.0.0.1:4000';
+          const email = process.env.AUTH_ATHLETE_EMAIL;
+          const password = process.env.AUTH_ATHLETE_PASSWORD;
+          if (!email || !password) throw new Error('Production athlete credentials are not configured');
+          const login = await fetch(`${base}/api/v1/auth/login`, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          });
+          if (!login.ok) throw new Error(`athlete login failed (${login.status})`);
+          const cookie = login.headers.get('set-cookie')?.split(';')[0];
+          if (!cookie) throw new Error('athlete login did not return a session cookie');
+          const checks = [
+            '/api/v1/ai/athlete/workout-context',
+            '/api/v1/ai/athlete/workouts',
+            '/api/v1/ai/athlete/performance',
+          ];
+          for (const path of checks) {
+            const response = await fetch(`${base}${path}`, { headers: { cookie } });
+            if (!response.ok) throw new Error(`${path} failed (${response.status})`);
+          }
+          console.log('athlete authenticated runtime ok · workout context + AI workouts + performance');
+          NODE
+          REMOTE
+
+      - name: Validate public athlete routes
+        run: |
+          set -euo pipefail
+          for path in /pt/athlete/home /pt/athlete/ai-workout /pt/athlete/performance; do
+            code="$(curl --silent --show-error --max-time 30 -H 'Cache-Control: no-cache' -o /tmp/page.html -w '%{http_code}' "$PUBLIC_URL$path")"
+            test "$code" = "200" || { echo "$path returned HTTP $code" >&2; exit 1; }
+            if [ "$path" = "/pt/athlete/home" ]; then
+              grep -Fq 'Criar treino com IA' /tmp/page.html || { echo 'Public athlete home missing AI workout action' >&2; exit 1; }
+              grep -Fq 'Acompanhar resultados' /tmp/page.html || { echo 'Public athlete home missing performance action' >&2; exit 1; }
+            fi
+          done
+          echo "public athlete experience ok · home + AI workout + performance routes"
+
+      - name: Remove ephemeral SSH key
+        if: always()
+        run: rm -f ~/.ssh/aquaos-web-verify ~/.ssh/aquaos-web-verify.pub
