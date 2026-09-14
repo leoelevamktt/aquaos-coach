@@ -11,10 +11,39 @@ export type LiveEvent = {
   record?: Record<string, unknown>;
 };
 
+const prerequisiteLabels: Record<string, string> = {
+  "age/birthDate": "data de nascimento/idade",
+  developmentLevel: "nível de desenvolvimento",
+  "specialty/event": "prova/especialidade",
+  poolLengthM: "tamanho da piscina",
+  phase: "fase do planejamento",
+  "objective/goal": "objetivo",
+  primaryZone: "zona principal",
+  targetVolumeM: "volume-alvo",
+};
+
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly payload: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
 export async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, { ...options, credentials: options?.credentials ?? "include" });
-  const payload = await response.json().catch(() => ({})) as T & { error?: string };
-  if (!response.ok) throw new Error(payload.error ?? `Falha na operação (${response.status})`);
+  const payload = await response.json().catch(() => ({})) as T & { error?: string; missing?: unknown };
+  if (!response.ok) {
+    const missing = Array.isArray(payload.missing)
+      ? payload.missing.filter((item): item is string => typeof item === "string").map((item) => prerequisiteLabels[item] ?? item)
+      : [];
+    const base = payload.error ?? `Falha na operação (${response.status})`;
+    const message = missing.length ? `${base} Pendências: ${missing.join(", ")}.` : base;
+    throw new ApiRequestError(message, response.status, payload as Record<string, unknown>);
+  }
   return payload;
 }
 
