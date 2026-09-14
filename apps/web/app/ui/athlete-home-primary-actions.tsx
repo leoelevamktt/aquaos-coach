@@ -1,0 +1,59 @@
+import { Sparkles, TrendingUp } from "lucide-react";
+
+export default function AthleteHomePrimaryActions() {
+  return <aside
+    aria-label="Ações principais do atleta"
+    style={{
+      position: "fixed",
+      left: "50%",
+      transform: "translateX(-50%)",
+      bottom: 74,
+      zIndex: 9999,
+      width: "min(508px, calc(100vw - 28px))",
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 8,
+      padding: 8,
+      border: "1px solid rgba(8,49,95,.14)",
+      borderRadius: 18,
+      background: "rgba(255,255,255,.985)",
+      boxShadow: "0 16px 40px rgba(7,42,68,.24)",
+    }}
+  >
+    <a
+      href="/pt/athlete/ai-workout"
+      style={{
+        minHeight: 58,
+        borderRadius: 13,
+        background: "#ffd200",
+        color: "#071d3d",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 7,
+        padding: "10px 9px",
+        fontSize: 12,
+        fontWeight: 900,
+        textDecoration: "none",
+      }}
+    ><Sparkles size={17} />Criar treino com IA</a>
+    <a
+      href="/pt/athlete/performance"
+      style={{
+        minHeight: 58,
+        border: "1px solid #0c315f",
+        borderRadius: 13,
+        background: "white",
+        color: "#0c315f",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 7,
+        padding: "10px 9px",
+        fontSize: 12,
+        fontWeight: 900,
+        textDecoration: "none",
+      }}
+    ><TrendingUp size={17} />Acompanhar resultados</a>
+  </aside>;
+}
