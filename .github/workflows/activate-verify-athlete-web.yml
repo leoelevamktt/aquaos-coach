@@ -14,10 +14,10 @@ concurrency:
 
 jobs:
   activate:
-    name: Force current web image and validate athlete experience
+    name: Force current API/web images and validate athlete experience
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     env:
       EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
       PUBLIC_URL: https://natacao.elevamkt.digital
@@ -50,7 +50,7 @@ jobs:
             --query Success --output text | grep -qx True
           ssh-keyscan -T 10 -H "$AWS_INSTANCE_HOST" >> ~/.ssh/known_hosts
 
-      - name: Activate exact GitHub revision on web container
+      - name: Activate exact GitHub revision on API and web containers
         run: |
           set -euo pipefail
           ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/aquaos-web-verify "$AWS_INSTANCE_USER@$AWS_INSTANCE_HOST" \
@@ -68,15 +68,28 @@ jobs:
           }
           echo "server git sha ok · $actual_sha"
 
-          # Rebuild from the exact checked-out revision and force the running web
-          # container to use that freshly built image. This removes ambiguity from
-          # Compose deciding that an older same-tag container can stay alive.
           export COMPOSE_PARALLEL_LIMIT=1
-          docker compose -f docker-compose.aws.yml build web
-          built_image="$(docker image inspect natacao-web:latest --format '{{.Id}}')"
-          docker compose -f docker-compose.aws.yml up -d --no-deps --force-recreate web
+          docker compose -f docker-compose.aws.yml build api web
+          built_api="$(docker image inspect natacao-api:latest --format '{{.Id}}')"
+          built_web="$(docker image inspect natacao-web:latest --format '{{.Id}}')"
 
-          for attempt in $(seq 1 30); do
+          # Force both containers. A same-tag image must never allow an older
+          # API or web container to survive a successful GitHub deployment.
+          docker compose -f docker-compose.aws.yml up -d --no-deps --force-recreate api web
+
+          for attempt in $(seq 1 40); do
+            if docker compose -f docker-compose.aws.yml exec -T api node -e \
+              "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"; then
+              break
+            fi
+            if [ "$attempt" -eq 40 ]; then
+              docker compose -f docker-compose.aws.yml logs --tail=160 api
+              exit 1
+            fi
+            sleep 2
+          done
+
+          for attempt in $(seq 1 40); do
             if docker compose -f docker-compose.aws.yml exec -T web node --input-type=module <<'NODE'
           const response = await fetch('http://127.0.0.1:3000/pt/athlete/home', { cache: 'no-store' });
           const html = await response.text();
@@ -89,23 +102,28 @@ jobs:
             then
               break
             fi
-            if [ "$attempt" -eq 30 ]; then
+            if [ "$attempt" -eq 40 ]; then
               docker compose -f docker-compose.aws.yml logs --tail=120 web
               exit 1
             fi
             sleep 2
           done
 
-          running_container="$(docker compose -f docker-compose.aws.yml ps -q web)"
-          running_image="$(docker inspect "$running_container" --format '{{.Image}}')"
-          test "$running_image" = "$built_image" || {
-            echo "Running web image is stale: built=$built_image running=$running_image" >&2
+          api_container="$(docker compose -f docker-compose.aws.yml ps -q api)"
+          web_container="$(docker compose -f docker-compose.aws.yml ps -q web)"
+          running_api="$(docker inspect "$api_container" --format '{{.Image}}')"
+          running_web="$(docker inspect "$web_container" --format '{{.Image}}')"
+          test "$running_api" = "$built_api" || {
+            echo "Running API image is stale: built=$built_api running=$running_api" >&2
             exit 1
           }
-          echo "web image identity ok · $running_image"
+          test "$running_web" = "$built_web" || {
+            echo "Running web image is stale: built=$built_web running=$running_web" >&2
+            exit 1
+          }
+          echo "api image identity ok · $running_api"
+          echo "web image identity ok · $running_web"
 
-          # Validate the athlete account against the real production API without
-          # printing credentials. These are read only from the API container env.
           docker compose -f docker-compose.aws.yml exec -T api node --input-type=module <<'NODE'
           const base = 'http://127.0.0.1:4000';
           const email = process.env.AUTH_ATHLETE_EMAIL;
@@ -115,7 +133,12 @@ jobs:
             method: 'POST', headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ email, password }),
           });
+          const loginText = await login.text();
           if (!login.ok) throw new Error(`athlete login failed (${login.status})`);
+          let loginBody = {};
+          try { loginBody = JSON.parse(loginText); } catch {}
+          const user = loginBody.user ?? loginBody.data?.user ?? {};
+          console.log(`athlete session metadata · role=${user.role ?? 'UNKNOWN'} · athleteId=${user.athleteId ? 'SET' : 'MISSING'} · organization=${user.organizationId ? 'SET' : 'MISSING'}`);
           const cookie = login.headers.get('set-cookie')?.split(';')[0];
           if (!cookie) throw new Error('athlete login did not return a session cookie');
           const checks = [
@@ -125,7 +148,11 @@ jobs:
           ];
           for (const path of checks) {
             const response = await fetch(`${base}${path}`, { headers: { cookie } });
-            if (!response.ok) throw new Error(`${path} failed (${response.status})`);
+            const text = await response.text();
+            if (!response.ok) {
+              let reason = text.slice(0, 300).replace(/\s+/g, ' ');
+              throw new Error(`${path} failed (${response.status}) · ${reason}`);
+            }
           }
           console.log('athlete authenticated runtime ok · workout context + AI workouts + performance');
           NODE
