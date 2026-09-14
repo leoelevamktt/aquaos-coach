@@ -4,12 +4,11 @@ export default function AthleteHomePrimaryActions() {
   return <aside
     aria-label="Ações principais do atleta"
     style={{
-      position: "fixed",
-      left: "50%",
-      transform: "translateX(-50%)",
-      bottom: 74,
-      zIndex: 9999,
-      width: "min(508px, calc(100vw - 28px))",
+      position: "absolute",
+      left: 16,
+      right: 16,
+      bottom: 86,
+      zIndex: 80,
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
       gap: 8,
@@ -18,6 +17,7 @@ export default function AthleteHomePrimaryActions() {
       borderRadius: 18,
       background: "rgba(255,255,255,.985)",
       boxShadow: "0 16px 40px rgba(7,42,68,.24)",
+      backdropFilter: "blur(12px)",
     }}
   >
     <a
@@ -33,6 +33,8 @@ export default function AthleteHomePrimaryActions() {
         gap: 7,
         padding: "10px 9px",
         fontSize: 12,
+        lineHeight: 1.15,
+        textAlign: "center",
         fontWeight: 900,
         textDecoration: "none",
       }}
@@ -51,6 +53,8 @@ export default function AthleteHomePrimaryActions() {
         gap: 7,
         padding: "10px 9px",
         fontSize: 12,
+        lineHeight: 1.15,
+        textAlign: "center",
         fontWeight: 900,
         textDecoration: "none",
       }}
