@@ -12,6 +12,7 @@ import {
   installCoachBrainLlmInjection,
 } from "./coach-brain-llm-injection.js";
 import { registerCoachBrainRoutes } from "./coach-brain.js";
+import { registerAthleteWorkoutAiRoutes } from "./athlete-workout-ai.js";
 import { registerRkfBrainReadinessRoute } from "./rkf-brain-readiness.js";
 
 export {
@@ -56,6 +57,7 @@ export function registerAiRoutes(...args: Parameters<typeof registerCoreAiRoutes
 
   registerCoreAiRoutes(...args);
   registerCoachBrainRoutes(app, managedStore, catalogStore);
+  registerAthleteWorkoutAiRoutes(app, managedStore, catalogStore);
   registerRkfBrainReadinessRoute(app, managedStore, catalogStore);
 
   app.get("/api/v1/ai/knowledge-status", async (request, reply) => {
