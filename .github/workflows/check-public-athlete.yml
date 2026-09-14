@@ -1,0 +1,40 @@
+name: Verify Public Athlete Experience
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/check-public-athlete.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Resolve production host and verify athlete routes
+        env:
+          PUBLIC_URL: https://natacao.elevamkt.digital
+          EXPECTED_HOST: ${{ secrets.AWS_INSTANCE_HOST }}
+        run: |
+          set -euo pipefail
+          resolved="$(getent ahostsv4 natacao.elevamkt.digital | awk '{print $1}' | sort -u | tr '\n' ' ')"
+          echo "production dns ipv4 · $resolved"
+          if [ -n "${EXPECTED_HOST:-}" ] && ! grep -qw "$EXPECTED_HOST" <<<"$resolved"; then
+            echo "DNS does not resolve to configured AWS host" >&2
+            exit 1
+          fi
+          for path in /pt/athlete/home /pt/athlete/ai-workout /pt/athlete/performance; do
+            code="$(curl --silent --show-error --location --max-time 30 -H 'Cache-Control: no-cache' -D /tmp/headers -o /tmp/page -w '%{http_code}' "$PUBLIC_URL$path?verify=$(date +%s)")"
+            echo "$path · HTTP $code · bytes=$(wc -c </tmp/page)"
+            sed -n '1,12p' /tmp/headers | sed -E 's/(set-cookie:).*/\1 [redacted]/I'
+            test "$code" = "200"
+            if [ "$path" = "/pt/athlete/home" ]; then
+              grep -Fq 'Criar treino com IA' /tmp/page || { echo 'public home missing AI action' >&2; exit 1; }
+              grep -Fq 'Acompanhar resultados' /tmp/page || { echo 'public home missing results action' >&2; exit 1; }
+              echo 'public home content ok · both athlete actions present in delivered HTML'
+            fi
+          done
