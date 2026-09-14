@@ -4,6 +4,20 @@ import type { ManagedStore } from "./managed-store.js";
 const DEMO_ATHLETE_ID = "ana-souza";
 const DEMO_USER_ID = "user-prod-athlete";
 const DEMO_PLAN_ID = "prod-demo-rkf-planning-anchor";
+const RKF_PHASES = new Set(["ADAPTACAO", "BASE", "DESENVOLVIMENTO", "ESPECIFICO", "ACUMULACAO", "TRANSFORMACAO", "REALIZACAO", "TAPER", "COMPETICAO"]);
+const RKF_ZONES = new Set(["VALAT", "A1", "A2", "A3", "AN1", "AN2"]);
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function isCompletePlanningAnchor(row: Record<string, unknown>) {
+  const snapshot = objectValue(row.publishedSnapshot ?? row.prescription ?? row);
+  const phase = String(snapshot.phase ?? row.phase ?? "").toUpperCase();
+  const zone = String(snapshot.primaryZone ?? row.primaryZone ?? "").toUpperCase();
+  const volume = Number(snapshot.totalVolumeM ?? row.totalVolumeM);
+  return RKF_PHASES.has(phase) && RKF_ZONES.has(zone) && Number.isFinite(volume) && volume > 0;
+}
 
 /**
  * The AUTH_ATHLETE_* production account is an operational smoke/demo account.
@@ -51,10 +65,11 @@ export function ensureProductionDemoAthletePlanning(store: ManagedStore, user: U
     String(row.organizationId ?? "org-demo") === organizationId
       && row.athleteId === DEMO_ATHLETE_ID
       && (row.status === "PUBLISHED" || Boolean(row.approvedBy) || Boolean(row.publishedSnapshot))
-      && row.id !== DEMO_PLAN_ID);
+      && row.id !== DEMO_PLAN_ID
+      && isCompletePlanningAnchor(row));
 
   if (existingCoachAnchor) {
-    return { applied: true, profilePatched: Object.keys(profilePatch).length > 0, planCreated: false, reason: "existing-coach-anchor" };
+    return { applied: true, profilePatched: Object.keys(profilePatch).length > 0, planCreated: false, reason: "existing-complete-coach-anchor" };
   }
 
   const publishedSnapshot = {
