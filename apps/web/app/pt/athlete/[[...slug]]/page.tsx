@@ -2,6 +2,7 @@ import AthleteApp from "../../../ui/AthleteApp";
 import AthleteAiWorkout from "../../../ui/athlete-ai-workout";
 import AthleteAiWorkoutShortcut from "../../../ui/athlete-ai-workout-shortcut";
 import AthletePerformance from "../../../ui/athlete-performance";
+import AthleteHomePrimaryActions from "../../../ui/athlete-home-primary-actions";
 
 export default async function AthletePage({ params }: { params: Promise<{ slug?: string[] }> }) {
   const { slug = [] } = await params;
@@ -10,6 +11,6 @@ export default async function AthletePage({ params }: { params: Promise<{ slug?:
 
   return <>
     <AthleteApp />
-    <AthleteAiWorkoutShortcut />
+    {slug[0] === "home" ? <AthleteHomePrimaryActions /> : <AthleteAiWorkoutShortcut />}
   </>;
 }
