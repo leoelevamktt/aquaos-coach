@@ -1,5 +1,5 @@
 import { registerAiRoutes as registerCoreAiRoutes } from "./ai-routes-core.js";
-import { getSession, roleAllows, sessionToken } from "./auth.js";
+import { attachAuthStore, getSession, roleAllows, sessionToken } from "./auth.js";
 import { buildRkfKnowledgeContext } from "./rkf-knowledge-injection.js";
 import {
   configureRkfCatalogLlmInjection,
@@ -15,6 +15,7 @@ import { registerCoachBrainRoutes } from "./coach-brain.js";
 import { registerAthleteWorkoutAiRoutes } from "./athlete-workout-ai.js";
 import { registerAthletePerformanceRoutes } from "./athlete-performance.js";
 import { registerRkfBrainReadinessRoute } from "./rkf-brain-readiness.js";
+import { reconcileProductionAthleteProfiles } from "./production-reconciliation.js";
 
 export {
   VISION_COACH_PROMPT,
@@ -27,6 +28,12 @@ export type { VisionAnalysisRecord } from "./ai-routes-core.js";
 
 export function registerAiRoutes(...args: Parameters<typeof registerCoreAiRoutes>) {
   const [app, managedStore, catalogStore] = args;
+
+  // Snapshots antigos de produção podiam preservar a conta autenticável e
+  // perder o prontuário vinculado. Reparamos isso antes de expor qualquer rota
+  // de treino/performance e recarregamos as contas persistidas no auth store.
+  reconcileProductionAthleteProfiles(managedStore);
+  attachAuthStore(managedStore);
 
   // Toda chamada OpenAI-compatible da área de IA herda a organização autenticada.
   // O Catálogo Mestre e o Cérebro RKF são camadas independentes: catálogo traz
