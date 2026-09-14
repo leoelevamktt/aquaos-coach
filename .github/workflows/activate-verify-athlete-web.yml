@@ -150,11 +150,20 @@ jobs:
             const response = await fetch(`${base}${path}`, { headers: { cookie } });
             const text = await response.text();
             if (!response.ok) {
-              let reason = text.slice(0, 300).replace(/\s+/g, ' ');
+              const reason = text.slice(0, 300).replace(/\s+/g, ' ');
               throw new Error(`${path} failed (${response.status}) · ${reason}`);
             }
           }
-          console.log('athlete authenticated runtime ok · workout context + AI workouts + performance');
+
+          const readinessResponse = await fetch(`${base}/api/v1/ai/athlete/generation-readiness?poolLengthM=50`, { headers: { cookie } });
+          const readinessText = await readinessResponse.text();
+          if (!readinessResponse.ok) throw new Error(`generation readiness failed (${readinessResponse.status}) · ${readinessText.slice(0, 300)}`);
+          let readiness = {};
+          try { readiness = JSON.parse(readinessText); } catch { throw new Error('generation readiness returned invalid JSON'); }
+          if (readiness.ready !== true || (Array.isArray(readiness.missing) && readiness.missing.length)) {
+            throw new Error(`production demo athlete is not RKF-generation-ready · missing=${JSON.stringify(readiness.missing ?? [])}`);
+          }
+          console.log('athlete authenticated runtime ok · context + workouts + performance + RKF generation readiness');
           NODE
           REMOTE
 
